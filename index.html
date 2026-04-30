@@ -296,7 +296,11 @@ async function loadKmz(){
     if(!r.ok) throw new Error(`HTTP ${r.status}`);
     const buf  = await r.arrayBuffer();
     const kml  = await extractFirstFileFromZip(buf, /\.kml$/i);
+    console.log("KML preview:", kml.slice(0, 600));
     const pins = parseKml(kml);
+    if(pins.length === 0){
+      throw new Error("Parsed 0 stations — open browser Console (F12) and look for 'KML preview' to see the raw format");
+    }
     buildBrowseLayer(pins);
     kmzLoaded = true;
     btn.textContent  = "🗺 Hide Station Layer";
@@ -407,17 +411,29 @@ async function extractFirstFileFromZip(buf, pattern){
   let eocd = -1;
   for(let i=b.length-22;i>=0;i--)
     if(b[i]===0x50&&b[i+1]===0x4b&&b[i+2]===0x05&&b[i+3]===0x06){eocd=i;break;}
-  if(eocd<0) throw new Error("Not a ZIP");
+  if(eocd<0) throw new Error("Not a ZIP file");
   const cdo=v.getUint32(eocd+16,true), nf=v.getUint16(eocd+8,true);
-  let pos=cdo, found=null;
+  let pos=cdo, found=null, allNames=[];
   for(let f=0;f<nf;f++){
     const fn=v.getUint16(pos+28,true),ex=v.getUint16(pos+30,true),cm=v.getUint16(pos+32,true);
     const meth=v.getUint16(pos+10,true),csz=v.getUint32(pos+20,true),lo=v.getUint32(pos+42,true);
     const name=new TextDecoder().decode(b.slice(pos+46,pos+46+fn));
+    allNames.push(name);
     if(pattern.test(name)) found={meth,csz,lo};
     pos+=46+fn+ex+cm;
   }
-  if(!found) throw new Error("No KML in KMZ");
+  // Fallback: if pattern didn't match, just take the first non-directory file
+  if(!found){
+    pos=cdo;
+    for(let f=0;f<nf;f++){
+      const fn=v.getUint16(pos+28,true),ex=v.getUint16(pos+30,true),cm=v.getUint16(pos+32,true);
+      const meth=v.getUint16(pos+10,true),csz=v.getUint32(pos+20,true),lo=v.getUint32(pos+42,true);
+      const name=new TextDecoder().decode(b.slice(pos+46,pos+46+fn));
+      if(!name.endsWith("/") && csz>0) { found={meth,csz,lo}; break; }
+      pos+=46+fn+ex+cm;
+    }
+  }
+  if(!found) throw new Error(`No matching file in ZIP. Found: ${allNames.join(", ")}`);
   const fn2=v.getUint16(found.lo+26,true),ex2=v.getUint16(found.lo+28,true);
   const ds=found.lo+30+fn2+ex2, comp=b.slice(ds,ds+found.csz);
   if(found.meth===0) return new TextDecoder("utf-8").decode(comp);
@@ -438,27 +454,58 @@ function parseKml(kmlText){
   const doc    = parser.parseFromString(kmlText, "text/xml");
   const marks  = doc.querySelectorAll("Placemark");
   const pins   = [];
-  marks.forEach(m => {
-    const name = m.querySelector("name")?.textContent?.trim() || "";
-    const desc = m.querySelector("description")?.textContent?.trim() || "";
-    const coords = m.querySelector("coordinates")?.textContent?.trim() || "";
-    if(!coords) return;
-    const [lonStr, latStr] = coords.split(",");
-    const lat = parseFloat(latStr), lon = parseFloat(lonStr);
-    if(isNaN(lat)||isNaN(lon)) return;
 
-    // Extract WMA and station number from name or description
-    // Typical name format: "A21_90162" or similar
-    const match = name.match(/^([A-Z][0-9]{1,2})_?([0-9]+)/i)
-                || desc.match(/([A-Z][0-9]{1,2})_([0-9]+)/i);
-    const wma = match ? match[1].toUpperCase() : "";
-    const id  = match ? match[2] : "";
-    // River/site label often in description
-    const rivMatch = desc.match(/RIVNAME[^>]*>([^<]+)/i)
-                  || desc.match(/<b>([^<]+)<\/b>/i);
-    const rivName = rivMatch ? rivMatch[1].trim() : "";
-    pins.push({ name, wma, id, lat, lon, rivName, desc });
+  marks.forEach(m => {
+    // Get name
+    const name = m.querySelector("name")?.textContent?.trim() || "";
+
+    // Get description — may contain HTML
+    const desc = m.querySelector("description")?.textContent?.trim() || "";
+
+    // Coordinates — try Point > coordinates first, then any coordinates element
+    const coordEl = m.querySelector("Point coordinates, coordinates");
+    const coords  = coordEl?.textContent?.trim() || "";
+    if(!coords) return;
+
+    // KML format is lon,lat,alt
+    const parts = coords.split(/[\s,]+/).filter(Boolean);
+    if(parts.length < 2) return;
+    const lon = parseFloat(parts[0]);
+    const lat = parseFloat(parts[1]);
+    if(isNaN(lat) || isNaN(lon)) return;
+    // SA bounds check: lat -35 to -22, lon 16 to 33
+    if(lat < -36 || lat > -20 || lon < 14 || lon > 35) return;
+
+    // Extract WMA code and station ID
+    // DWS names can be like "A21 90162", "A21_90162", "C11 90589", etc.
+    // Also try the description which often has the data URL with WMA/ID
+    let wma = "", id = "";
+
+    // Try name first: letter(s) + digits, space/underscore, digits
+    let match = name.match(/^([A-Z][0-9]{1,2})\s*[_\s]\s*([0-9]+)/i);
+    if(!match) match = name.match(/([A-Z][0-9]{1,2})_([0-9]+)/i);
+
+    // Try description — look for the data URL pattern /WMA/WMA_ID.zip
+    if(!match){
+      const urlMatch = desc.match(/\/([A-Z][0-9]{1,2})\/([A-Z][0-9]{1,2})_([0-9]+)\./i);
+      if(urlMatch){ wma = urlMatch[1].toUpperCase(); id = urlMatch[3]; }
+    } else {
+      wma = match[1].toUpperCase();
+      id  = match[2];
+    }
+
+    // Try href links in description as last resort
+    if(!wma){
+      const hrefMatch = desc.match(/data\/([A-Z][0-9]{1,2})\/[A-Z][0-9]{1,2}_([0-9]+)/i);
+      if(hrefMatch){ wma = hrefMatch[1].toUpperCase(); id = hrefMatch[2]; }
+    }
+
+    // Get river/site description — strip HTML tags
+    const cleanDesc = desc.replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim().slice(0,80);
+
+    pins.push({ name, wma, id, lat, lon, rivName: cleanDesc, desc });
   });
+
   return pins;
 }
 
