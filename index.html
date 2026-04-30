@@ -772,6 +772,8 @@ function expandCluster(cl, layer, targetMap, clusterMarker){
   // Zoom in to see them
   targetMap.setView([cl.lat, cl.lon], Math.max(targetMap.getZoom(), 13));
 }
+
+function addFromMap(wma, id, name, lat, lon){
   if(stations.some(s=>s.wma===wma&&s.id===id)){
     alert("Station already in dashboard"); return;
   }
