@@ -197,15 +197,32 @@
     <div id="main">
       <div id="toprow">
         <div id="mapbox">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-            <div class="lbl" style="margin:0">STATION MAP</div>
-            <div style="display:flex;gap:5px;align-items:center">
-              <span id="kmz-status" style="font-size:10px;color:#7bafd4"></span>
-              <button class="btn abtn" id="kmz-btn" onclick="loadKmz(false)"
-                style="font-size:10px;padding:3px 8px">🗺 Browse All Stations</button>
-              <button class="btn" onclick="openFullscreen()"
-                style="font-size:10px;padding:3px 8px" title="Fullscreen map">⛶</button>
+          <div style="display:flex;align-items:center;gap:5px;margin-bottom:4px;flex-wrap:wrap">
+            <div class="lbl" style="margin:0;white-space:nowrap">STATION MAP</div>
+            <!-- Search box -->
+            <div style="position:relative;flex:1;min-width:120px;max-width:260px">
+              <input id="stn-search-main" type="text"
+                placeholder="Search station or river…"
+                style="width:100%;padding:3px 22px 3px 7px;background:#0a1628;
+                border:1px solid #1e3a6e;border-radius:3px;color:#e8f4fd;
+                font-family:inherit;font-size:10px;outline:none"
+                oninput="searchStations(this.value,'main')"
+                onfocus="this.style.borderColor='#00d4aa'"
+                onblur="this.style.borderColor='#1e3a6e'"/>
+              <button id="search-clear-main" onclick="clearSearch('main')"
+                style="position:absolute;right:4px;top:50%;transform:translateY(-50%);
+                background:none;border:none;color:#7bafd4;cursor:pointer;
+                font-size:12px;display:none;padding:0">×</button>
+              <div id="search-results-main"
+                style="position:absolute;top:100%;left:0;right:0;margin-top:2px;
+                background:#0f2040;border:1px solid #1e3a6e;border-radius:4px;
+                max-height:200px;overflow-y:auto;z-index:3000;display:none"></div>
             </div>
+            <span id="kmz-status" style="font-size:10px;color:#7bafd4;white-space:nowrap"></span>
+            <button class="btn abtn" id="kmz-btn" onclick="loadKmz(false)"
+              style="font-size:10px;padding:3px 8px;white-space:nowrap">🗺 Browse All Stations</button>
+            <button class="btn" onclick="openFullscreen()"
+              style="font-size:10px;padding:3px 8px" title="Fullscreen map">⛶</button>
           </div>
           <div id="mapel"></div>
         </div>
@@ -298,7 +315,7 @@ function exc(data,twqr){
 }
 
 // ── App state ─────────────────────────────────────────────────────────────────
-let stations=[{id:"90162",wma:"A21",name:"A21_90162",lat:null,lon:null,loaded:false,error:null,data:null}];
+let stations=[{id:"90585",wma:"C13",name:"C13_90585",lat:-27.16944,lon:29.23389,loaded:false,error:null,data:null}];
 let ai=0, ap=null, proxyUrl="https://dark-wave-214d.mvandl.workers.dev", chart=null, lmap=null, lmarkers=[];
 
 // ── Map init ──────────────────────────────────────────────────────────────────
@@ -410,11 +427,10 @@ async function loadKmz(fullscreen=false){
   ["kmz-status","kmz-status-fs"].forEach(id=>{const el=document.getElementById(id);if(el){el.textContent=countText;el.style.color="#4ade80";}});
   document.getElementById("fs-stn-count").textContent = countText;
 
-  // If fullscreen is open, add layer there too
+  // If fullscreen is open, build its own layer from cache
   if(fsMap && document.getElementById("map-overlay").classList.contains("open")){
-    if(fsBrowseLayer){ fsBrowseLayer.remove(); }
-    fsBrowseLayer = browseLayer;
-    fsBrowseLayer.addTo(fsMap);
+    if(fsBrowseLayer){ fsBrowseLayer.remove(); fsBrowseLayer=null; }
+    fsBrowseLayer = buildLayerForMap(allPins, fsMap);
   }
 }
 
@@ -499,17 +515,24 @@ async function loadKmzFromFile(file){
 }
 
 function toggleBrowseLayer(fullscreen=false){
-  if(!browseLayer||!lmap) return;
-  const isVisible = lmap.hasLayer(browseLayer);
-  if(isVisible){
-    lmap.removeLayer(browseLayer);
-    if(fsMap) fsMap.removeLayer(browseLayer);
-    ["kmz-btn","kmz-btn-fs"].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent="🗺 Show Station Layer";});
+  if(fullscreen){
+    if(!fsMap) return;
+    if(fsBrowseLayer){
+      fsBrowseLayer.remove(); fsBrowseLayer=null;
+      document.getElementById("kmz-btn-fs").textContent="🗺 Show Station Layer";
+    } else {
+      fsBrowseLayer = buildLayerForMap(allPinsCache, fsMap);
+      document.getElementById("kmz-btn-fs").textContent="🗺 Hide Station Layer";
+    }
   } else {
-    browseLayer.addTo(lmap);
-    if(fsMap && document.getElementById("map-overlay").classList.contains("open"))
-      browseLayer.addTo(fsMap);
-    ["kmz-btn","kmz-btn-fs"].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent="🗺 Hide Station Layer";});
+    if(!browseLayer||!lmap) return;
+    if(lmap.hasLayer(browseLayer)){
+      lmap.removeLayer(browseLayer);
+      document.getElementById("kmz-btn").textContent="🗺 Show Station Layer";
+    } else {
+      browseLayer.addTo(lmap);
+      document.getElementById("kmz-btn").textContent="🗺 Hide Station Layer";
+    }
   }
 }
 
@@ -997,15 +1020,15 @@ let fsBrowseLayer = null;
 function openFullscreen(){
   const overlay = document.getElementById("map-overlay");
   overlay.classList.add("open");
-  // Init fullscreen map if not done yet
+
   if(!fsMap){
     fsMap = L.map("map-fullscreen", {zoomControl:true}).setView([-29,25],5);
     L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
       {attribution:"© CartoDB", maxZoom:19}).addTo(fsMap);
   }
-  setTimeout(()=>fsMap.invalidateSize(), 100);
+  setTimeout(()=>fsMap.invalidateSize(), 150);
 
-  // Copy dashboard station markers to fullscreen map
+  // Add dashboard station markers
   fsMarkers.forEach(m=>m.remove()); fsMarkers=[];
   stations.forEach(s=>{
     if(!s.lat||!s.lon) return;
@@ -1018,14 +1041,16 @@ function openFullscreen(){
       .addTo(fsMap));
   });
 
-  // Copy browse layer if loaded
-  if(browseLayer && kmzLoaded){
-    if(fsBrowseLayer){ fsBrowseLayer.remove(); }
-    fsBrowseLayer = browseLayer;
-    fsBrowseLayer.addTo(fsMap);
+  // Build a fresh browse layer for the fullscreen map from cached pins
+  if(allPinsCache.length > 0){
+    if(fsBrowseLayer){ fsBrowseLayer.remove(); fsBrowseLayer=null; }
+    fsBrowseLayer = buildLayerForMap(allPinsCache, fsMap);
     document.getElementById("kmz-btn-fs").textContent = "🗺 Hide Station Layer";
     document.getElementById("fs-stn-count").textContent =
-      document.getElementById("kmz-status").textContent;
+      `${allPinsCache.length} stations`;
+  } else {
+    document.getElementById("kmz-btn-fs").textContent = "🗺 Browse All Stations";
+    document.getElementById("fs-stn-count").textContent = "";
   }
 }
 
@@ -1034,18 +1059,51 @@ function closeFullscreen(){
   if(fsBrowseLayer){ fsBrowseLayer.remove(); fsBrowseLayer=null; }
 }
 
+// Build a Leaflet LayerGroup of station pins for a given map instance
+function buildLayerForMap(pins, targetMap){
+  const layer = L.layerGroup();
+  const greyIcon = L.divIcon({
+    html:`<div style="width:8px;height:8px;border-radius:50%;
+      background:#7bafd4;border:1px solid #fff;opacity:0.85"></div>`,
+    className:"", iconAnchor:[4,4]
+  });
+  pins.forEach(p => {
+    const alreadyAdded = stations.some(s => s.wma===p.wma && s.id===p.id);
+    const popupHtml = `
+      <div style="font-family:monospace;font-size:11px;min-width:160px">
+        <b style="color:#00d4aa">${p.name}</b><br/>
+        ${p.rivName?`<span style="color:#7bafd4">${p.rivName.slice(0,50)}</span><br/>`:""}
+        <span style="color:#7bafd4">WMA:</span> ${p.wma} &nbsp;
+        <span style="color:#7bafd4">ID:</span> ${p.id}<br/>
+        <span style="color:#7bafd4">Coords:</span> ${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}<br/><br/>
+        ${alreadyAdded
+          ? `<span style="color:#4ade80">✓ Already in dashboard</span>`
+          : `<button onclick="addFromMap('${p.wma}','${p.id}','${p.name.replace(/'/g,"\\'")}',${p.lat},${p.lon})"
+               style="background:#00d4aa22;border:1px solid #00d4aa;color:#00d4aa;
+               border-radius:3px;padding:3px 8px;cursor:pointer;font-family:monospace;
+               font-size:11px;width:100%">+ Add to Dashboard</button>`
+        }
+      </div>`;
+    layer.addLayer(L.marker([p.lat,p.lon],{icon:greyIcon}).bindPopup(popupHtml,{maxWidth:220}));
+  });
+  layer.addTo(targetMap);
+  return layer;
+}
+
 // ── Station search ────────────────────────────────────────────────────────────
 let allPinsCache = [];  // populated when browse layer loads
 
 function searchStations(query, ctx){
-  const resId  = `search-results-${ctx}`;
-  const clrId  = `search-clear-${ctx}`;
-  const resEl  = document.getElementById(resId);
-  const clrEl  = document.getElementById(clrId);
+  const resEl = document.getElementById(`search-results-${ctx}`);
+  const clrEl = document.getElementById(`search-clear-${ctx}`);
   if(clrEl) clrEl.style.display = query ? "block" : "none";
+  if(!resEl) return;
 
   if(!query || query.length < 2){ resEl.style.display="none"; return; }
-  if(!allPinsCache.length){ resEl.innerHTML=`<div class="sr-item" style="color:#7bafd4">Load stations first using Browse All Stations</div>`; resEl.style.display="block"; return; }
+  if(!allPinsCache.length){
+    resEl.innerHTML=`<div class="sr-item" style="color:#7bafd4">Click "Browse All Stations" first to load station data</div>`;
+    resEl.style.display="block"; return;
+  }
 
   const q = query.toLowerCase();
   const matches = allPinsCache.filter(p =>
@@ -1069,30 +1127,34 @@ function searchStations(query, ctx){
 }
 
 function clearSearch(ctx){
-  const inp = document.getElementById(`stn-search-${ctx}`)||document.getElementById(`stn-search-fs`);
+  const inp = document.getElementById(`stn-search-${ctx}`);
   if(inp) inp.value="";
-  document.getElementById(`search-results-${ctx}`).style.display="none";
+  const res = document.getElementById(`search-results-${ctx}`);
+  if(res) res.style.display="none";
   const clr = document.getElementById(`search-clear-${ctx}`);
   if(clr) clr.style.display="none";
 }
 
 function selectPin(lat, lon, wma, id, name, ctx){
-  // Close search results
-  document.getElementById(`search-results-${ctx}`).style.display="none";
-  const inp = document.getElementById(`stn-search-fs`);
+  // Close search results and clear input
+  const res = document.getElementById(`search-results-${ctx}`);
+  if(res) res.style.display="none";
+  const inp = document.getElementById(`stn-search-${ctx}`);
   if(inp) inp.value = name;
+  const clr = document.getElementById(`search-clear-${ctx}`);
+  if(clr) clr.style.display="block";
 
-  // Zoom the appropriate map
+  // Zoom the right map
   const targetMap = ctx==="fs" ? fsMap : lmap;
-  if(targetMap) targetMap.setView([lat,lon], 12);
+  if(targetMap) targetMap.setView([lat, lon], 12);
 
-  // Open popup if pin exists in browse layer
-  if(browseLayer){
-    browseLayer.eachLayer(m=>{
+  // Open the popup on the right layer
+  const targetLayer = ctx==="fs" ? fsBrowseLayer : browseLayer;
+  if(targetLayer){
+    targetLayer.eachLayer(m=>{
       const ll = m.getLatLng();
       if(Math.abs(ll.lat-lat)<0.001 && Math.abs(ll.lng-lon)<0.001){
-        if(ctx==="fs" && fsMap) m.addTo(fsMap).openPopup();
-        else m.openPopup();
+        m.openPopup();
       }
     });
   }
@@ -1100,8 +1162,8 @@ function selectPin(lat, lon, wma, id, name, ctx){
 
 // Close search results when clicking outside
 document.addEventListener("click", e=>{
-  if(!e.target.closest("#search-wrap") && !e.target.closest("#search-results-fs")){
-    ["search-results-fs"].forEach(id=>{
+  if(!e.target.closest("#search-wrap")){
+    ["search-results-fs","search-results-main"].forEach(id=>{
       const el=document.getElementById(id);
       if(el) el.style.display="none";
     });
