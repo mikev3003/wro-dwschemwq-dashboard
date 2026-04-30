@@ -274,49 +274,75 @@ function refreshMap(){
 }
 
 // ── KMZ / KML station browser ─────────────────────────────────────────────────
-const KMZ_URL = "https://www.dws.gov.za/iwqs/wms/data/chem333.kmz";
-let browseLayer = null;   // L.layerGroup for all 333 pins
+// The 19 WMA KMZ files — each contains stations for that water management area
+const WMA_KMZS = [
+  {code:"WMA01", name:"Limpopo"},
+  {code:"WMA02", name:"Luvuvhu & Letaba"},
+  {code:"WMA03", name:"Crocodile West & Marico"},
+  {code:"WMA04", name:"Olifants"},
+  {code:"WMA05", name:"Inkomati"},
+  {code:"WMA06", name:"Usutu to Mhlatuze"},
+  {code:"WMA07", name:"Thukela"},
+  {code:"WMA08", name:"Upper Vaal"},
+  {code:"WMA09", name:"Middle Vaal"},
+  {code:"WMA10", name:"Lower Vaal"},
+  {code:"WMA11", name:"Mvoti to Umzimkulu"},
+  {code:"WMA12", name:"Mzimvubu to Keiskamma"},
+  {code:"WMA13", name:"Upper Orange"},
+  {code:"WMA14", name:"Lower Orange"},
+  {code:"WMA15", name:"Fish to Tsitsikamma"},
+  {code:"WMA16", name:"Gouritz"},
+  {code:"WMA17", name:"Olifants-Doorn"},
+  {code:"WMA18", name:"Breede"},
+  {code:"WMA19", name:"Berg"},
+];
+
+let browseLayer = null;
 let kmzLoaded   = false;
 
 async function loadKmz(){
   if(kmzLoaded){ toggleBrowseLayer(); return; }
+
+  if(!proxyUrl){ showKmzHelp(); return; }
+
   const btn    = document.getElementById("kmz-btn");
   const status = document.getElementById("kmz-status");
+  btn.textContent = "⏳ Loading…"; btn.disabled = true;
 
-  if(!proxyUrl){
-    showKmzHelp();
+  const allPins = [];
+  let loaded = 0;
+
+  for(const wma of WMA_KMZS){
+    const kmzUrl = `https://www.dws.gov.za/iwqs/wms/data/${wma.code}_reg_WMS_nobor.kmz`;
+    const proxied = `${proxyUrl.replace(/\/$/,"")}/proxy?url=${encodeURIComponent(kmzUrl)}`;
+    status.textContent = `Loading ${wma.name}… (${loaded}/${WMA_KMZS.length})`;
+    try {
+      const r = await fetch(proxied, {mode:"cors"});
+      if(!r.ok) continue;
+      const buf = await r.arrayBuffer();
+      const kml = await extractFirstFileFromZip(buf, /\.kml$/i);
+      const pins = parseKml(kml);
+      allPins.push(...pins);
+      loaded++;
+    } catch(e) {
+      console.warn(`Failed ${wma.code}:`, e.message);
+    }
+  }
+
+  if(allPins.length === 0){
+    status.textContent = "❌ No stations found";
+    status.style.color = "#ff5c5c";
+    btn.textContent = "🗺 Browse All Stations";
+    btn.disabled = false;
     return;
   }
 
-  btn.textContent = "⏳ Loading…"; btn.disabled = true;
-  status.textContent = "";
-  try {
-    const url = `${proxyUrl.replace(/\/$/,"")}/proxy?url=${encodeURIComponent(KMZ_URL)}`;
-    console.log("Fetching KMZ via:", url);
-    const r   = await fetch(url, {mode:"cors"});
-    console.log("Response status:", r.status, r.statusText);
-    if(!r.ok) throw new Error(`HTTP ${r.status}`);
-    const buf  = await r.arrayBuffer();
-    console.log("Buffer size (bytes):", buf.byteLength);
-    const kml  = await extractFirstFileFromZip(buf, /\.kml$/i);
-    console.log("KML length:", kml.length);
-    console.log("KML preview:", kml.slice(0, 800));
-    const pins = parseKml(kml);
-    console.log("Pins found:", pins.length);
-    if(pins.length === 0){
-      throw new Error("Parsed 0 stations — check browser Console (F12) for KML preview");
-    }
-    buildBrowseLayer(pins);
-    kmzLoaded = true;
-    btn.textContent  = "🗺 Hide Station Layer";
-    status.textContent = `${pins.length} stations`;
-    status.style.color = "#4ade80";
-  } catch(e) {
-    btn.textContent = "🗺 Browse All Stations";
-    status.textContent = "❌ " + e.message;
-    status.style.color = "#ff5c5c";
-  }
+  buildBrowseLayer(allPins);
+  kmzLoaded = true;
+  btn.textContent = "🗺 Hide Station Layer";
   btn.disabled = false;
+  status.textContent = `${allPins.length} stations`;
+  status.style.color = "#4ade80";
 }
 
 function showKmzHelp(){
@@ -457,60 +483,56 @@ async function extractFirstFileFromZip(buf, pattern){
 function parseKml(kmlText){
   const parser = new DOMParser();
   const doc    = parser.parseFromString(kmlText, "text/xml");
-  const marks  = doc.querySelectorAll("Placemark");
-  const pins   = [];
 
+  // querySelector fails with namespaces — use getElementsByTagNameNS or wildcards
+  const ns = "http://www.opengis.net/kml/2.2";
+  let marks = Array.from(doc.getElementsByTagNameNS(ns, "Placemark"));
+  // Fallback: no namespace
+  if(!marks.length) marks = Array.from(doc.getElementsByTagName("Placemark"));
+  // Fallback: wildcard
+  if(!marks.length) marks = Array.from(doc.querySelectorAll("*")).filter(el=>el.localName==="Placemark");
+
+  const getText = (el, tag) => {
+    let found = el.getElementsByTagNameNS(ns, tag)[0]
+              || el.getElementsByTagName(tag)[0];
+    return found?.textContent?.trim() || "";
+  };
+
+  const pins = [];
   marks.forEach(m => {
-    // Get name
-    const name = m.querySelector("name")?.textContent?.trim() || "";
-
-    // Get description — may contain HTML
-    const desc = m.querySelector("description")?.textContent?.trim() || "";
-
-    // Coordinates — try Point > coordinates first, then any coordinates element
-    const coordEl = m.querySelector("Point coordinates, coordinates");
-    const coords  = coordEl?.textContent?.trim() || "";
+    const name   = getText(m, "name");
+    const desc   = getText(m, "description");
+    const coords = getText(m, "coordinates");
     if(!coords) return;
 
-    // KML format is lon,lat,alt
-    const parts = coords.split(/[\s,]+/).filter(Boolean);
+    // KML: lon,lat,alt
+    const parts = coords.trim().split(/[\s,]+/).filter(Boolean);
     if(parts.length < 2) return;
     const lon = parseFloat(parts[0]);
     const lat = parseFloat(parts[1]);
-    if(isNaN(lat) || isNaN(lon)) return;
-    // SA bounds check: lat -35 to -22, lon 16 to 33
-    if(lat < -36 || lat > -20 || lon < 14 || lon > 35) return;
+    if(isNaN(lat)||isNaN(lon)) return;
+    // SA bounds check
+    if(lat < -36||lat > -20||lon < 14||lon > 35) return;
 
-    // Extract WMA code and station ID
-    // DWS names can be like "A21 90162", "A21_90162", "C11 90589", etc.
-    // Also try the description which often has the data URL with WMA/ID
-    let wma = "", id = "";
-
-    // Try name first: letter(s) + digits, space/underscore, digits
-    let match = name.match(/^([A-Z][0-9]{1,2})\s*[_\s]\s*([0-9]+)/i);
-    if(!match) match = name.match(/([A-Z][0-9]{1,2})_([0-9]+)/i);
-
-    // Try description — look for the data URL pattern /WMA/WMA_ID.zip
-    if(!match){
-      const urlMatch = desc.match(/\/([A-Z][0-9]{1,2})\/([A-Z][0-9]{1,2})_([0-9]+)\./i);
-      if(urlMatch){ wma = urlMatch[1].toUpperCase(); id = urlMatch[3]; }
-    } else {
-      wma = match[1].toUpperCase();
-      id  = match[2];
+    // Extract WMA + ID from name or description URL
+    let wma="", id="";
+    let match = name.match(/^([A-Z][0-9]{1,2})\s*[_\s]\s*([0-9]+)/i)
+              || name.match(/([A-Z][0-9]{1,2})_([0-9]+)/i);
+    if(match){ wma=match[1].toUpperCase(); id=match[2]; }
+    else {
+      const u = desc.match(/data\/([A-Z][0-9]{1,2})\/[A-Z][0-9]{1,2}_([0-9]+)\./i);
+      if(u){ wma=u[1].toUpperCase(); id=u[2]; }
     }
 
-    // Try href links in description as last resort
-    if(!wma){
-      const hrefMatch = desc.match(/data\/([A-Z][0-9]{1,2})\/[A-Z][0-9]{1,2}_([0-9]+)/i);
-      if(hrefMatch){ wma = hrefMatch[1].toUpperCase(); id = hrefMatch[2]; }
-    }
-
-    // Get river/site description — strip HTML tags
     const cleanDesc = desc.replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim().slice(0,80);
-
-    pins.push({ name, wma, id, lat, lon, rivName: cleanDesc, desc });
+    pins.push({name, wma, id, lat, lon, rivName:cleanDesc, desc});
   });
 
+  console.log("Total Placemarks found:", marks.length, "Valid pins:", pins.length);
+  if(marks.length > 0 && pins.length === 0){
+    // Log first placemark to debug
+    console.log("First Placemark XML:", marks[0].outerHTML?.slice(0,400));
+  }
   return pins;
 }
 
