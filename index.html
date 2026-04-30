@@ -98,7 +98,8 @@
     <div class="lbl">CORS PROXY URL</div>
     <div class="row">
       <input id="pxi" style="flex:1;max-width:380px"
-        placeholder="https://your-worker.workers.dev  (leave blank to try direct)"
+        placeholder="https://your-worker.workers.dev"
+        value="https://dark-wave-214d.mvandl.workers.dev"
         onchange="proxyUrl=this.value.trim()"/>
       <button class="btn" onclick="testProxy()">Test</button>
       <button class="btn" onclick="clearProxy()">Clear</button>
@@ -235,7 +236,7 @@ function exc(data,twqr){
 
 // ── App state ─────────────────────────────────────────────────────────────────
 let stations=[{id:"90162",wma:"A21",name:"A21_90162",lat:null,lon:null,loaded:false,error:null,data:null}];
-let ai=0, ap=null, proxyUrl="", chart=null, lmap=null, lmarkers=[];
+let ai=0, ap=null, proxyUrl="https://dark-wave-214d.mvandl.workers.dev", chart=null, lmap=null, lmarkers=[];
 
 // ── Map init ──────────────────────────────────────────────────────────────────
 function initMap(){
@@ -768,7 +769,8 @@ function addStation(){
 function toggleSettings(){document.getElementById("setpan").classList.toggle("open");}
 
 async function testProxy(){
-  proxyUrl=document.getElementById("pxi").value.trim();
+  const input=document.getElementById("pxi");
+  if(input) proxyUrl=input.value.trim();
   const b=document.getElementById("pbadge");
   b.style.display="inline-block";b.textContent="● …";b.style.color=C.warn;b.style.borderColor=C.warn;
   try{
@@ -826,7 +828,12 @@ async function loadStnFromFile(i, file){
 }
 
 // ── Boot — wait for DOM + CDN scripts ────────────────────────────────────────
-window.addEventListener("load",()=>{initMap();refresh();});
+window.addEventListener("load",()=>{
+  initMap();
+  refresh();
+  // Auto-test the proxy on load so users see status immediately
+  if(proxyUrl) testProxy();
+});
 </script>
 </body>
 </html>
