@@ -514,14 +514,17 @@ function parseKml(kmlText){
     // SA bounds check
     if(lat < -36||lat > -20||lon < 14||lon > 35) return;
 
-    // Extract WMA + ID from name or description URL
+    // Extract WMA + ID from description URL first (most reliable)
+    // DWS descriptions contain href links like /data/W1/W1_102810.zip
     let wma="", id="";
-    let match = name.match(/^([A-Z][0-9]{1,2})\s*[_\s]\s*([0-9]+)/i)
-              || name.match(/([A-Z][0-9]{1,2})_([0-9]+)/i);
-    if(match){ wma=match[1].toUpperCase(); id=match[2]; }
+    const urlMatch = desc.match(/\/data\/([A-Z][0-9]{1,2})\/[A-Z][0-9]{1,2}_([0-9]+)\./i);
+    if(urlMatch){ wma=urlMatch[1].toUpperCase(); id=urlMatch[2]; }
     else {
-      const u = desc.match(/data\/([A-Z][0-9]{1,2})\/[A-Z][0-9]{1,2}_([0-9]+)\./i);
-      if(u){ wma=u[1].toUpperCase(); id=u[2]; }
+      // Fall back to parsing name e.g. "W1H010", "A2H006", "C1H007"
+      // Pattern: 1 letter + 1-2 digits (WMA) + H + digits (station code) + space + numeric ID
+      const nameMatch = name.match(/^([A-Z][0-9]{1,2})[A-Z][0-9]+\s+([0-9]+)/i)
+                     || name.match(/^([A-Z][0-9]{1,2})\s*[_]\s*([0-9]+)/i);
+      if(nameMatch){ wma=nameMatch[1].toUpperCase(); id=nameMatch[2]; }
     }
 
     const cleanDesc = desc.replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim().slice(0,80);
