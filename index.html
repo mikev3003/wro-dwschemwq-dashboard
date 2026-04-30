@@ -206,31 +206,38 @@ window.addEventListener('error', function(e){
 const C={bg:"#0a1628",card:"#122448",border:"#1e3a6e",accent:"#00d4aa",
   accent2:"#4fc3f7",warn:"#ffb347",danger:"#ff5c5c",text:"#e8f4fd",muted:"#7bafd4",good:"#4ade80"};
 
-// ── Parameter metadata + SA TWQR ──────────────────────────────────────────────
+// ── Parameter metadata — matched to exact DWS column names ───────────────────
 const PARAMS={
-  EC:       {label:"EC (mS/m)",         unit:"mS/m", twqr:[0,70],  color:"#4fc3f7"},
-  PH:       {label:"pH",                unit:"",     twqr:[6,9],   color:"#a78bfa"},
-  TURB:     {label:"Turbidity (NTU)",   unit:"NTU",  twqr:[0,1],   color:"#fb923c"},
-  CHLORIDE: {label:"Chloride (mg/L)",   unit:"mg/L", twqr:[0,100], color:"#34d399"},
-  SODIUM:   {label:"Sodium (mg/L)",     unit:"mg/L", twqr:[0,100], color:"#f472b6"},
-  NITRATE:  {label:"Nitrate (mg/L)",    unit:"mg/L", twqr:[0,6],   color:"#facc15"},
-  PHOSPHATE:{label:"Phosphate (mg/L)",  unit:"mg/L", twqr:[0,1],   color:"#f87171"},
-  TDS:      {label:"TDS (mg/L)",        unit:"mg/L", twqr:[0,450], color:"#60a5fa"},
-  CALCIUM:  {label:"Calcium (mg/L)",    unit:"mg/L", twqr:[0,80],  color:"#c084fc"},
-  SULPHATE: {label:"Sulphate (mg/L)",   unit:"mg/L", twqr:[0,200], color:"#2dd4bf"},
-  COD:      {label:"COD (mg/L)",        unit:"mg/L", twqr:[0,10],  color:"#fb7185"},
-  DO:       {label:"Dissolved O₂ (mg/L)",unit:"mg/L",twqr:[6,100], color:"#86efac"},
-  FLUORIDE: {label:"Fluoride (mg/L)",   unit:"mg/L", twqr:[0,1],   color:"#fbbf24"},
-  MAGNESIUM:{label:"Magnesium (mg/L)",  unit:"mg/L", twqr:[0,70],  color:"#a3e635"},
-  POTASSIUM:{label:"Potassium (mg/L)",  unit:"mg/L", twqr:[0,50],  color:"#e879f9"},
+  EC_Phys_Water:     {label:"EC (mS/m)",            unit:"mS/m", twqr:[0,70],   color:"#4fc3f7", key:"EC"},
+  pH_Diss_Water:     {label:"pH",                    unit:"",     twqr:[6,9],    color:"#a78bfa", key:"pH"},
+  Ca_Diss_Water:     {label:"Calcium (mg/L)",         unit:"mg/L", twqr:[0,80],   color:"#c084fc", key:"Ca"},
+  Cl_Diss_Water:     {label:"Chloride (mg/L)",        unit:"mg/L", twqr:[0,100],  color:"#34d399", key:"Cl"},
+  F_Diss_Water:      {label:"Fluoride (mg/L)",        unit:"mg/L", twqr:[0,1],    color:"#fbbf24", key:"F"},
+  K_Diss_Water:      {label:"Potassium (mg/L)",       unit:"mg/L", twqr:[0,50],   color:"#e879f9", key:"K"},
+  Mg_Diss_Water:     {label:"Magnesium (mg/L)",       unit:"mg/L", twqr:[0,70],   color:"#a3e635", key:"Mg"},
+  Na_Diss_Water:     {label:"Sodium (mg/L)",          unit:"mg/L", twqr:[0,100],  color:"#f472b6", key:"Na"},
+  NH4_N_Diss_Water:  {label:"Ammonia-N (mg/L)",       unit:"mg/L", twqr:[0,1],    color:"#fb923c", key:"NH4"},
+  NO3_NO2_N_Diss_Water:{label:"Nitrate+Nitrite-N (mg/L)",unit:"mg/L",twqr:[0,6], color:"#facc15", key:"NO3"},
+  P_Tot_Water:       {label:"Total P (mg/L)",         unit:"mg/L", twqr:[0,0.5],  color:"#f87171", key:"TP"},
+  PO4_P_Diss_Water:  {label:"Phosphate-P (mg/L)",     unit:"mg/L", twqr:[0,1],    color:"#fb7185", key:"PO4"},
+  SO4_Diss_Water:    {label:"Sulphate (mg/L)",        unit:"mg/L", twqr:[0,200],  color:"#2dd4bf", key:"SO4"},
+  TAL_Diss_Water:    {label:"Alkalinity (mg/L)",      unit:"mg/L", twqr:[0,null], color:"#60a5fa", key:"TAL"},
+  Si_Diss_Water:     {label:"Silica (mg/L)",          unit:"mg/L", twqr:[0,null], color:"#86efac", key:"Si"},
+  DMS_Tot_Water:     {label:"Dissolved Solids (mg/L)",unit:"mg/L", twqr:[0,450],  color:"#38bdf8", key:"TDS"},
+  KJEL_N_Tot_Water:  {label:"Kjeldahl-N (mg/L)",      unit:"mg/L", twqr:[0,null], color:"#d946ef", key:"KN"},
 };
+
 function pm(col){
-  const up=col.toUpperCase();
-  for(const[k,m]of Object.entries(PARAMS))if(up.includes(k))return{...m,key:k};
-  return{label:col,unit:"",twqr:null,color:"#7bafd4",key:col};
+  // Exact match first
+  if(PARAMS[col]) return {...PARAMS[col], col};
+  // Partial match fallback
+  for(const[k,m]of Object.entries(PARAMS))
+    if(col.toUpperCase().includes(k.toUpperCase().split("_")[0])) return {...m, col};
+  return{label:col,unit:"",twqr:null,color:"#7bafd4",key:col,col};
 }
+
 function exc(data,twqr){
-  if(!twqr||!data.length)return null;
+  if(!twqr||!data.length||twqr[1]===null)return null;
   return Math.round(data.filter(d=>d.v<twqr[0]||d.v>twqr[1]).length/data.length*100);
 }
 
@@ -663,14 +670,41 @@ function parseCsv(text){
 }
 
 function mkSeries(rows,headers){
-  const dc=headers.find(h=>/date/i.test(h));
-  const matched=headers.filter(h=>Object.keys(PARAMS).some(p=>h.toUpperCase().includes(p)));
-  const series={};matched.forEach(h=>{series[h]=[];});
+  const dc = headers.find(h => h.toLowerCase().includes("date"));
+
+  // Match only exact DWS column names, skip _dl detection limit columns
+  const paramCols = Object.keys(PARAMS);
+  const matched = headers.filter(h =>
+    paramCols.includes(h) && !h.endsWith("_dl")
+  );
+
+  // Deduplicate — if two columns map to same key, keep the one with more data
+  const byKey = {};
+  for(const h of matched){
+    const meta = pm(h);
+    const key  = meta.key;
+    if(!byKey[key]) byKey[key] = h;
+    // Count non-empty values to pick the better column
+    else {
+      const existingCount = rows.filter(r => r[byKey[key]] && r[byKey[key]] !== "#N/A").length;
+      const newCount      = rows.filter(r => r[h] && r[h] !== "#N/A").length;
+      if(newCount > existingCount) byKey[key] = h;
+    }
+  }
+  const dedupedCols = Object.values(byKey);
+
+  const series={};
+  dedupedCols.forEach(h=>{series[h]=[];});
   for(const row of rows){
     const d=new Date(row[dc]||"");if(isNaN(d))continue;
-    for(const h of matched){const vv=parseFloat(row[h]);if(!isNaN(vv))series[h].push({t:d,d:d.toISOString().slice(0,10),v:vv});}
+    for(const h of dedupedCols){
+      const raw=row[h];
+      if(!raw||raw==="#N/A") continue;
+      const vv=parseFloat(raw);
+      if(!isNaN(vv)) series[h].push({t:d,d:d.toISOString().slice(0,10),v:vv});
+    }
   }
-  return{series,matched};
+  return{series, matched:dedupedCols};
 }
 
 // ── Chart ─────────────────────────────────────────────────────────────────────
