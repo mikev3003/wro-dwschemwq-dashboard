@@ -514,10 +514,15 @@ function burl(wma,stn,px){
   return px?`${px.replace(/\/$/,"")}/proxy?url=${encodeURIComponent(d)}`:d;
 }
 
-async function fetchZip(url){
-  const r=await fetch(url,{mode:"cors"});
-  if(!r.ok)throw new Error(`HTTP ${r.status} ${r.statusText}`);
-  const buf=await r.arrayBuffer();
+async function fetchZip(url, existingBuf){
+  let buf;
+  if(existingBuf){
+    buf=existingBuf;
+  } else {
+    const r=await fetch(url,{mode:"cors"});
+    if(!r.ok)throw new Error(`HTTP ${r.status} ${r.statusText}`);
+    buf=await r.arrayBuffer();
+  }
   const b=new Uint8Array(buf),v=new DataView(buf);
   let eocd=-1;
   for(let i=b.length-22;i>=0;i--)
@@ -676,24 +681,42 @@ function renderList(){
   stations.forEach((s,i)=>{
     const d=document.createElement("div");
     d.className="sc"+(i===ai?" on":"");
-    d.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:flex-start">
-      <div style="flex:1;min-width:0">
-        <div style="font-weight:700;color:${i===ai?C.accent:C.text};margin-bottom:1px">${s.name}</div>
-        <div style="font-size:10px;color:${C.muted}">${s.wma}_${s.id}</div>
-        ${s.data?`<div style="font-size:10px;color:${C.good};margin-top:1px">✓ ${s.data.rowCount} samples · ${s.data.matched.length} params</div>`:""}
-        ${s.error?`<div style="font-size:10px;color:${C.danger};margin-top:1px;word-break:break-word">✗ ${s.error}</div>`:""}
+    const isCors = s.error && (s.error.includes("fetch")||s.error.includes("403")||s.error.includes("CORS"));
+    d.innerHTML=`
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:700;color:${i===ai?C.accent:C.text};margin-bottom:1px">${s.name}</div>
+          <div style="font-size:10px;color:${C.muted}">${s.wma}_${s.id}</div>
+          ${s.data?`<div style="font-size:10px;color:${C.good};margin-top:1px">✓ ${s.data.rowCount} samples · ${s.data.matched.length} params</div>`:""}
+          ${s.error?`<div style="font-size:10px;color:${C.danger};margin-top:1px;word-break:break-word">✗ ${isCors?"CORS blocked — use proxy or upload ZIP below":s.error}</div>`:""}
+        </div>
+        <button class="btn" style="border:none;color:${C.muted};font-size:14px;padding:0 4px"
+          data-rm="${i}">×</button>
       </div>
-      <button class="btn" style="border:none;color:${C.muted};font-size:14px;padding:0 4px"
-        data-rm="${i}">×</button></div>
-    ${!s.loaded&&!s.error?`<button class="btn abtn" style="width:100%;margin-top:5px;font-size:10px"
-      data-ld="${i}">↓ Fetch Data</button>`:""}
-    ${s.loaded?`<button class="btn" style="width:100%;margin-top:3px;font-size:9px"
-      data-rl="${i}">↺ Reload</button>`:""}`;
+      ${!s.loaded&&!s.error?`
+        <button class="btn abtn" style="width:100%;margin-top:5px;font-size:10px" data-ld="${i}">
+          ↓ Fetch Data ${proxyUrl?"":"(needs proxy)"}
+        </button>`:""}
+      ${s.loaded?`
+        <button class="btn" style="width:100%;margin-top:3px;font-size:9px" data-rl="${i}">↺ Reload</button>`:""}
+      ${!s.loaded?`
+        <div id="dropzone-${i}"
+          style="margin-top:5px;border:1px dashed #1e3a6e;border-radius:4px;
+            padding:5px 6px;text-align:center;font-size:10px;color:#7bafd4;cursor:pointer;
+            transition:all .15s"
+          ondragover="dzOver(event,${i})" ondragleave="dzOut(event,${i})"
+          ondrop="dzDrop(event,${i})" onclick="dzClick(${i})">
+          📂 Drop ZIP here or click to upload
+          <input type="file" id="zipfile-${i}" accept=".zip" style="display:none"
+            onchange="loadStnFromFile(${i},this.files[0])"/>
+        </div>`:""}`;
     d.onclick=e=>{
       const rm=e.target.dataset.rm,ld=e.target.dataset.ld,rl=e.target.dataset.rl;
       if(rm!==undefined){rmStn(+rm);return;}
       if(ld!==undefined){loadStn(+ld);return;}
       if(rl!==undefined){rlStn(+rl);return;}
+      // Don't switch station if clicking dropzone controls
+      if(e.target.closest(`#dropzone-${i}`))return;
       ai=i;refresh();
     };
     el.appendChild(d);
@@ -759,6 +782,47 @@ async function testProxy(){
 function clearProxy(){
   proxyUrl="";document.getElementById("pxi").value="";
   const b=document.getElementById("pbadge");b.style.display="none";
+}
+
+// ── Dropzone helpers ──────────────────────────────────────────────────────────
+function dzOver(e,i){
+  e.preventDefault();e.stopPropagation();
+  const dz=document.getElementById(`dropzone-${i}`);
+  if(dz){dz.style.borderColor="#00d4aa";dz.style.color="#00d4aa";dz.style.background="#00d4aa11";}
+}
+function dzOut(e,i){
+  e.preventDefault();e.stopPropagation();
+  const dz=document.getElementById(`dropzone-${i}`);
+  if(dz){dz.style.borderColor="#1e3a6e";dz.style.color="#7bafd4";dz.style.background="";}
+}
+function dzDrop(e,i){
+  e.preventDefault();e.stopPropagation();
+  dzOut(e,i);
+  const file=e.dataTransfer.files[0];
+  if(file) loadStnFromFile(i,file);
+}
+function dzClick(i){
+  document.getElementById(`zipfile-${i}`)?.click();
+}
+
+async function loadStnFromFile(i, file){
+  if(!file) return;
+  const s=stations[i];
+  stations[i]={...s,error:null}; renderList();
+  try{
+    const buf=await file.arrayBuffer();
+    const txt=await fetchZip(null, buf);   // pass buf directly, skip network fetch
+    const{headers,rows}=parseCsv(txt);
+    const{series,matched}=mkSeries(rows,headers);
+    let lat=s.lat,lon=s.lon;
+    const lc=headers.find(h=>/^lat/i.test(h)),nc=headers.find(h=>/^lo?n/i.test(h));
+    if(lc&&rows[0])lat=parseFloat(rows[0][lc])||lat;
+    if(nc&&rows[0])lon=parseFloat(rows[0][nc])||lon;
+    stations[i]={...s,loaded:true,error:null,lat,lon,
+      data:{headers,rows,series,matched,rowCount:rows.length}};
+    if(!ap&&matched.length)ap=matched[0];
+  }catch(e){stations[i]={...s,error:e.message};}
+  refresh();
 }
 
 // ── Boot — wait for DOM + CDN scripts ────────────────────────────────────────
