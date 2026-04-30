@@ -4,6 +4,7 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>WRO · DWS Chemical Water Quality</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💧</text></svg>"/>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; background: #0a1628; color: #e8f4fd;
@@ -28,6 +29,30 @@
     #mapel  { width: 100%; height: 205px; border: 1px solid #1e3a6e; border-radius: 6px;
               background: #122448; }
     #statsbox { width: 225px; padding: 9px; border-left: 1px solid #1e3a6e; overflow-y: auto; flex-shrink: 0; }
+
+    /* Fullscreen map overlay */
+    #map-overlay { display: none; position: fixed; inset: 0; z-index: 2000;
+      background: #0a1628; flex-direction: column; }
+    #map-overlay.open { display: flex; }
+    #map-overlay-hdr { display: flex; align-items: center; gap: 8px; padding: 8px 14px;
+      background: #0f2040; border-bottom: 1px solid #1e3a6e; flex-shrink: 0; }
+    #map-fullscreen { width: 100%; flex: 1; }
+    #search-wrap { position: relative; flex: 1; max-width: 340px; }
+    #stn-search { width: 100%; padding: 5px 28px 5px 8px; background: #0a1628;
+      border: 1px solid #1e3a6e; border-radius: 4px; color: #e8f4fd;
+      font-family: inherit; font-size: 11px; outline: none; }
+    #stn-search:focus { border-color: #00d4aa; }
+    #search-clear { position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+      background: none; border: none; color: #7bafd4; cursor: pointer; font-size: 13px;
+      display: none; padding: 0; }
+    #search-results { position: absolute; top: 100%; left: 0; right: 0; margin-top: 3px;
+      background: #0f2040; border: 1px solid #1e3a6e; border-radius: 4px;
+      max-height: 220px; overflow-y: auto; z-index: 3000; display: none; }
+    .sr-item { padding: 6px 10px; cursor: pointer; border-bottom: 1px solid #1e3a6e22;
+      font-size: 11px; }
+    .sr-item:hover { background: #122448; }
+    .sr-name { color: #00d4aa; font-weight: 700; }
+    .sr-desc { color: #7bafd4; font-size: 10px; margin-top: 1px; }
     #chartbox { flex: 1; padding: 9px; display: flex; flex-direction: column; min-height: 0; }
     #canvaswrap { flex: 1; position: relative; min-height: 0; }
     #myChart { display: none; }
@@ -89,7 +114,8 @@
     <div style="margin-left:auto;display:flex;gap:7px;align-items:center">
       <span id="lcnt" style="font-size:10px;color:#7bafd4">0/1 loaded</span>
       <span id="pbadge"></span>
-      <button class="btn" onclick="toggleSettings()">⚙ Settings</button>
+      <!-- Settings hidden — proxy is preconfigured -->
+      <!-- <button class="btn" onclick="toggleSettings()">⚙ Settings</button> -->
     </div>
   </div>
 
@@ -138,6 +164,35 @@
       </div>
     </div>
 
+      <!-- Fullscreen map overlay -->
+      <div id="map-overlay">
+        <div id="map-overlay-hdr">
+          <div style="font-size:13px;font-weight:700;color:#00d4aa;letter-spacing:1px">🗺 STATION BROWSER</div>
+          <div id="search-wrap" style="margin-left:10px">
+            <input id="stn-search-fs" type="text" placeholder="Search station, river or WMA…"
+              style="width:100%;padding:5px 28px 5px 8px;background:#0a1628;border:1px solid #1e3a6e;
+              border-radius:4px;color:#e8f4fd;font-family:inherit;font-size:11px;outline:none"
+              oninput="searchStations(this.value,'fs')" onfocus="this.style.borderColor='#00d4aa'"
+              onblur="this.style.borderColor='#1e3a6e'"/>
+            <button id="search-clear-fs" onclick="clearSearch('fs')"
+              style="position:absolute;right:6px;top:50%;transform:translateY(-50%);
+              background:none;border:none;color:#7bafd4;cursor:pointer;font-size:13px;display:none">×</button>
+            <div id="search-results-fs" style="position:absolute;top:100%;left:0;right:0;margin-top:3px;
+              background:#0f2040;border:1px solid #1e3a6e;border-radius:4px;
+              max-height:260px;overflow-y:auto;z-index:3000;display:none"></div>
+          </div>
+          <span id="kmz-status-fs" style="font-size:10px;color:#7bafd4;margin-left:6px"></span>
+          <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
+            <span id="fs-stn-count" style="font-size:10px;color:#7bafd4"></span>
+            <button class="btn abtn" id="kmz-btn-fs" onclick="loadKmz(true)"
+              style="font-size:10px;padding:3px 8px">🗺 Browse All Stations</button>
+            <button class="btn" onclick="closeFullscreen()"
+              style="font-size:10px;padding:3px 8px">✕ Close</button>
+          </div>
+        </div>
+        <div id="map-fullscreen"></div>
+      </div>
+
     <!-- Main -->
     <div id="main">
       <div id="toprow">
@@ -146,9 +201,10 @@
             <div class="lbl" style="margin:0">STATION MAP</div>
             <div style="display:flex;gap:5px;align-items:center">
               <span id="kmz-status" style="font-size:10px;color:#7bafd4"></span>
-              <button class="btn abtn" id="kmz-btn" onclick="loadKmz()" style="font-size:10px;padding:3px 8px">
-                🗺 Browse All Stations
-              </button>
+              <button class="btn abtn" id="kmz-btn" onclick="loadKmz(false)"
+                style="font-size:10px;padding:3px 8px">🗺 Browse All Stations</button>
+              <button class="btn" onclick="openFullscreen()"
+                style="font-size:10px;padding:3px 8px" title="Fullscreen map">⛶</button>
             </div>
           </div>
           <div id="mapel"></div>
@@ -181,7 +237,7 @@
 
   <div id="ftr">
     <span>Data: DWS RQIS · <a href="https://www.dws.gov.za/iwqs/wms/data/" target="_blank">dws.gov.za/iwqs/wms/data</a></span>
-    <span>WRO · TWQR = SA Water Quality Guidelines (Domestic Use)</span>
+    <span>TWQR source: <a href="https://www.dws.gov.za/iwqs/wq_guide/index.html" target="_blank">DWAF (1996) SA Water Quality Guidelines Vol.1: Domestic Use</a> · For official use verify against current DWS/SANS 241 standards</span>
   </div>
 </div>
 
@@ -307,14 +363,15 @@ const WMA_KMZS = [
 let browseLayer = null;
 let kmzLoaded   = false;
 
-async function loadKmz(){
-  if(kmzLoaded){ toggleBrowseLayer(); return; }
+async function loadKmz(fullscreen=false){
+  if(kmzLoaded){ toggleBrowseLayer(fullscreen); return; }
 
   if(!proxyUrl){ showKmzHelp(); return; }
 
-  const btn    = document.getElementById("kmz-btn");
-  const status = document.getElementById("kmz-status");
-  btn.textContent = "⏳ Loading…"; btn.disabled = true;
+  const btn    = document.getElementById(fullscreen?"kmz-btn-fs":"kmz-btn");
+  const status = document.getElementById(fullscreen?"kmz-status-fs":"kmz-status");
+  // Keep both buttons in sync
+  ["kmz-btn","kmz-btn-fs"].forEach(id=>{const el=document.getElementById(id);if(el){el.textContent="⏳ Loading…";el.disabled=true;}});
 
   const allPins = [];
   let loaded = 0;
@@ -322,7 +379,7 @@ async function loadKmz(){
   for(const wma of WMA_KMZS){
     const kmzUrl = `https://www.dws.gov.za/iwqs/wms/data/${wma.code}_reg_WMS_nobor.kmz`;
     const proxied = `${proxyUrl.replace(/\/$/,"")}/proxy?url=${encodeURIComponent(kmzUrl)}`;
-    status.textContent = `Loading ${wma.name}… (${loaded}/${WMA_KMZS.length})`;
+    ["kmz-status","kmz-status-fs"].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent=`Loading ${wma.name}… (${loaded}/${WMA_KMZS.length})`;});
     try {
       const r = await fetch(proxied, {mode:"cors"});
       if(!r.ok) continue;
@@ -337,19 +394,28 @@ async function loadKmz(){
   }
 
   if(allPins.length === 0){
-    status.textContent = "❌ No stations found";
-    status.style.color = "#ff5c5c";
-    btn.textContent = "🗺 Browse All Stations";
-    btn.disabled = false;
+    ["kmz-status","kmz-status-fs"].forEach(id=>{const el=document.getElementById(id);if(el){el.textContent="❌ No stations found";el.style.color="#ff5c5c";}});
+    ["kmz-btn","kmz-btn-fs"].forEach(id=>{const el=document.getElementById(id);if(el){el.textContent="🗺 Browse All Stations";el.disabled=false;}});
     return;
   }
 
+  // Cache all pins for search
+  allPinsCache = allPins;
+
   buildBrowseLayer(allPins);
   kmzLoaded = true;
-  btn.textContent = "🗺 Hide Station Layer";
-  btn.disabled = false;
-  status.textContent = `${allPins.length} stations`;
-  status.style.color = "#4ade80";
+
+  const countText = `${allPins.length} stations`;
+  ["kmz-btn","kmz-btn-fs"].forEach(id=>{const el=document.getElementById(id);if(el){el.textContent="🗺 Hide Station Layer";el.disabled=false;}});
+  ["kmz-status","kmz-status-fs"].forEach(id=>{const el=document.getElementById(id);if(el){el.textContent=countText;el.style.color="#4ade80";}});
+  document.getElementById("fs-stn-count").textContent = countText;
+
+  // If fullscreen is open, add layer there too
+  if(fsMap && document.getElementById("map-overlay").classList.contains("open")){
+    if(fsBrowseLayer){ fsBrowseLayer.remove(); }
+    fsBrowseLayer = browseLayer;
+    fsBrowseLayer.addTo(fsMap);
+  }
 }
 
 function showKmzHelp(){
@@ -432,15 +498,18 @@ async function loadKmzFromFile(file){
   btn.disabled = false;
 }
 
-function toggleBrowseLayer(){
-  const btn = document.getElementById("kmz-btn");
+function toggleBrowseLayer(fullscreen=false){
   if(!browseLayer||!lmap) return;
-  if(lmap.hasLayer(browseLayer)){
+  const isVisible = lmap.hasLayer(browseLayer);
+  if(isVisible){
     lmap.removeLayer(browseLayer);
-    btn.textContent = "🗺 Show Station Layer";
+    if(fsMap) fsMap.removeLayer(browseLayer);
+    ["kmz-btn","kmz-btn-fs"].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent="🗺 Show Station Layer";});
   } else {
     browseLayer.addTo(lmap);
-    btn.textContent = "🗺 Hide Station Layer";
+    if(fsMap && document.getElementById("map-overlay").classList.contains("open"))
+      browseLayer.addTo(fsMap);
+    ["kmz-btn","kmz-btn-fs"].forEach(id=>{const el=document.getElementById(id);if(el)el.textContent="🗺 Hide Station Layer";});
   }
 }
 
@@ -587,12 +656,11 @@ function addFromMap(wma, id, name, lat, lon){
   }
   stations.push({id,wma,name,lat,lon,loaded:false,error:null,data:null});
   if(ai<0) ai=0;
-  // Close popup and refresh
-  lmap.closePopup();
+  if(lmap) lmap.closePopup();
+  if(fsMap) fsMap.closePopup();
   refresh();
-  // Auto-scroll sidebar to bottom
-  const sl = document.getElementById("stnlist");
-  sl.scrollTop = sl.scrollHeight;
+  const sl=document.getElementById("stnlist");
+  sl.scrollTop=sl.scrollHeight;
 }
 function burl(wma,stn,px){
   const d=`https://www.dws.gov.za/iwqs/wms/data/${wma}/${wma}_${stn}.zip`;
@@ -772,6 +840,11 @@ function renderStats(){
       <div class="stcl">TWQR EXCEEDANCE</div>
       <div style="font-size:20px;font-weight:700;color:${ec}">${ex}%</div>
       <div style="font-size:9px;color:${C.muted}">Target: ${meta.twqr[0]}–${meta.twqr[1]} ${meta.unit||""}</div>
+      <div style="font-size:9px;color:${C.muted};margin-top:4px;line-height:1.5;border-top:1px solid ${C.border};padding-top:4px">
+        Source: DWAF (1996) SA Water Quality Guidelines Vol.1: Domestic Use.<br/>
+        Verify against current <a href="https://www.dws.gov.za/iwqs/wq_guide/index.html"
+          target="_blank" style="color:${C.accent2}">DWS guidelines</a> &amp; SANS 241 for official use.
+      </div>
     </div>`:""}`;
 }
 
@@ -916,7 +989,124 @@ function clearProxy(){
   const b=document.getElementById("pbadge");b.style.display="none";
 }
 
-// ── Dropzone helpers ──────────────────────────────────────────────────────────
+// ── Fullscreen map ────────────────────────────────────────────────────────────
+let fsMap = null;
+let fsMarkers = [];
+let fsBrowseLayer = null;
+
+function openFullscreen(){
+  const overlay = document.getElementById("map-overlay");
+  overlay.classList.add("open");
+  // Init fullscreen map if not done yet
+  if(!fsMap){
+    fsMap = L.map("map-fullscreen", {zoomControl:true}).setView([-29,25],5);
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+      {attribution:"© CartoDB", maxZoom:19}).addTo(fsMap);
+  }
+  setTimeout(()=>fsMap.invalidateSize(), 100);
+
+  // Copy dashboard station markers to fullscreen map
+  fsMarkers.forEach(m=>m.remove()); fsMarkers=[];
+  stations.forEach(s=>{
+    if(!s.lat||!s.lon) return;
+    const col = s.loaded?"#00d4aa":"#4fc3f7";
+    const icon = L.divIcon({html:`<div style="width:13px;height:13px;border-radius:50%;
+      background:${col};border:2px solid #fff;box-shadow:0 0 8px ${col}"></div>`,
+      className:"",iconAnchor:[7,7]});
+    fsMarkers.push(L.marker([s.lat,s.lon],{icon,zIndexOffset:1000})
+      .bindPopup(`<b style="color:#00d4aa">${s.name}</b><br/>${s.wma}_${s.id}`)
+      .addTo(fsMap));
+  });
+
+  // Copy browse layer if loaded
+  if(browseLayer && kmzLoaded){
+    if(fsBrowseLayer){ fsBrowseLayer.remove(); }
+    fsBrowseLayer = browseLayer;
+    fsBrowseLayer.addTo(fsMap);
+    document.getElementById("kmz-btn-fs").textContent = "🗺 Hide Station Layer";
+    document.getElementById("fs-stn-count").textContent =
+      document.getElementById("kmz-status").textContent;
+  }
+}
+
+function closeFullscreen(){
+  document.getElementById("map-overlay").classList.remove("open");
+  if(fsBrowseLayer){ fsBrowseLayer.remove(); fsBrowseLayer=null; }
+}
+
+// ── Station search ────────────────────────────────────────────────────────────
+let allPinsCache = [];  // populated when browse layer loads
+
+function searchStations(query, ctx){
+  const resId  = `search-results-${ctx}`;
+  const clrId  = `search-clear-${ctx}`;
+  const resEl  = document.getElementById(resId);
+  const clrEl  = document.getElementById(clrId);
+  if(clrEl) clrEl.style.display = query ? "block" : "none";
+
+  if(!query || query.length < 2){ resEl.style.display="none"; return; }
+  if(!allPinsCache.length){ resEl.innerHTML=`<div class="sr-item" style="color:#7bafd4">Load stations first using Browse All Stations</div>`; resEl.style.display="block"; return; }
+
+  const q = query.toLowerCase();
+  const matches = allPinsCache.filter(p =>
+    p.name.toLowerCase().includes(q) ||
+    p.wma.toLowerCase().includes(q)  ||
+    p.rivName.toLowerCase().includes(q) ||
+    p.id.includes(q)
+  ).slice(0, 30);
+
+  if(!matches.length){
+    resEl.innerHTML=`<div class="sr-item" style="color:#7bafd4">No matches found</div>`;
+    resEl.style.display="block"; return;
+  }
+
+  resEl.innerHTML = matches.map(p => `
+    <div class="sr-item" onclick="selectPin(${p.lat},${p.lon},'${p.wma}','${p.id}','${p.name.replace(/'/g,"\\'")}','${ctx}')">
+      <div class="sr-name">${p.name} <span style="color:#7bafd4;font-weight:400">${p.wma}_${p.id}</span></div>
+      ${p.rivName?`<div class="sr-desc">${p.rivName.slice(0,60)}</div>`:""}
+    </div>`).join("");
+  resEl.style.display="block";
+}
+
+function clearSearch(ctx){
+  const inp = document.getElementById(`stn-search-${ctx}`)||document.getElementById(`stn-search-fs`);
+  if(inp) inp.value="";
+  document.getElementById(`search-results-${ctx}`).style.display="none";
+  const clr = document.getElementById(`search-clear-${ctx}`);
+  if(clr) clr.style.display="none";
+}
+
+function selectPin(lat, lon, wma, id, name, ctx){
+  // Close search results
+  document.getElementById(`search-results-${ctx}`).style.display="none";
+  const inp = document.getElementById(`stn-search-fs`);
+  if(inp) inp.value = name;
+
+  // Zoom the appropriate map
+  const targetMap = ctx==="fs" ? fsMap : lmap;
+  if(targetMap) targetMap.setView([lat,lon], 12);
+
+  // Open popup if pin exists in browse layer
+  if(browseLayer){
+    browseLayer.eachLayer(m=>{
+      const ll = m.getLatLng();
+      if(Math.abs(ll.lat-lat)<0.001 && Math.abs(ll.lng-lon)<0.001){
+        if(ctx==="fs" && fsMap) m.addTo(fsMap).openPopup();
+        else m.openPopup();
+      }
+    });
+  }
+}
+
+// Close search results when clicking outside
+document.addEventListener("click", e=>{
+  if(!e.target.closest("#search-wrap") && !e.target.closest("#search-results-fs")){
+    ["search-results-fs"].forEach(id=>{
+      const el=document.getElementById(id);
+      if(el) el.style.display="none";
+    });
+  }
+});
 function dzOver(e,i){
   e.preventDefault();e.stopPropagation();
   const dz=document.getElementById(`dropzone-${i}`);
