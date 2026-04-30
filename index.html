@@ -468,7 +468,9 @@ async function loadSampleCounts(){
       const html = await r.text();
       const parsed = parseSampleCountsHtml(html);
       Object.assign(sampleCountsCache, parsed);
-      total += Object.keys(parsed).length;
+      const wmaCount = Object.keys(parsed).length;
+      console.log(`${wma.code} (${wma.name}): ${wmaCount} stations parsed`);
+      total += wmaCount;
       wmasLoaded++;
     } catch(e) {
       console.warn(`Counts failed ${wma.code}:`, e.message);
@@ -477,6 +479,9 @@ async function loadSampleCounts(){
 
   countsLoaded = true;
   const msg = `${total} station counts loaded`;
+  console.log(`✅ Total counts loaded: ${total}`);
+  const firstKey = Object.keys(sampleCountsCache)[0];
+  if(firstKey) console.log(`Sample entry — ${firstKey}:`, sampleCountsCache[firstKey]);
   ["kmz-status","kmz-status-fs"].forEach(id=>{
     const el=document.getElementById(id);
     if(el){ el.textContent=msg; el.style.color="#4ade80"; }
@@ -775,7 +780,7 @@ function pinPopupHtml(p){
       <span style="color:#4ade80;font-weight:700">${counts.n.toLocaleString()} samples</span><br/>
       <span style="color:#7bafd4;font-size:10px">${counts.first} → ${counts.last}</span><br/>
       ${counts.medEC&&counts.medEC!=="n/a"?`<span style="color:#7bafd4;font-size:10px">Median EC: ${counts.medEC} mS/m</span>`:""}
-    </div>` : `<span style="color:#7bafd4;font-size:10px">📊 Click "Load Sample Counts" for stats</span><br/>`}
+    </div>` : ""}
     <br/>
     ${alreadyAdded
       ? `<span style="color:#4ade80">✓ Already in dashboard</span>`
