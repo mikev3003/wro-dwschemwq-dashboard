@@ -814,24 +814,25 @@ function renderChart(data,meta){
     label:meta?.key||ap,
     data:sorted.map(d=>({x:d.d,y:d.v})),
     borderColor:col,backgroundColor:col+"22",borderWidth:1.5,
-    pointRadius:sorted.length>200?0:2,pointHoverRadius:5,tension:0.1,fill:false
+    pointRadius:sorted.length>200?0:2,pointHoverRadius:5,tension:0.1,fill:false,
+    pointStyle:'line'
   }];
   if(meta?.twqr){
     datasets.push({label:`Max TWQR (${meta.twqr[1]} ${meta.unit||""})`,
       data:sorted.map(d=>({x:d.d,y:meta.twqr[1]})),
       borderColor:"#ffb34799",borderWidth:1,
-      borderDash:[6,4],pointRadius:0,fill:false});
+      borderDash:[6,4],pointRadius:0,fill:false,pointStyle:'line'});
     if(meta.twqr[0]>0)datasets.push({label:`Min TWQR (${meta.twqr[0]} ${meta.unit||""})`,
       data:sorted.map(d=>({x:d.d,y:meta.twqr[0]})),
       borderColor:"#ffb34799",borderWidth:1,
-      borderDash:[6,4],pointRadius:0,fill:false});
+      borderDash:[6,4],pointRadius:0,fill:false,pointStyle:'line'});
   }
   if(chart){chart.destroy();chart=null;}
   chart=new Chart(canvas,{
     type:"line",data:{datasets},
     options:{responsive:true,maintainAspectRatio:false,animation:false,
       parsing:{xAxisKey:"x",yAxisKey:"y"},
-      plugins:{legend:{labels:{color:C.muted,font:{size:10},boxWidth:12}},
+      plugins:{legend:{labels:{color:C.muted,font:{size:10},usePointStyle:true,pointStyleWidth:24}},
         tooltip:{backgroundColor:C.card,titleColor:C.muted,bodyColor:col,
           callbacks:{label:ctx=>`${ctx.parsed.y} ${meta?.unit||""}`}}},
       scales:{
