@@ -638,42 +638,140 @@ function parseKml(kmlText){
   return pins;
 }
 
+// ── Clustering helpers ────────────────────────────────────────────────────────
+const CLUSTER_DIST = 0.008; // ~800m — pins closer than this get clustered
+
+function clusterPins(pins){
+  const used = new Array(pins.length).fill(false);
+  const clusters = [];
+  for(let i=0;i<pins.length;i++){
+    if(used[i]) continue;
+    const group = [pins[i]];
+    used[i] = true;
+    for(let j=i+1;j<pins.length;j++){
+      if(used[j]) continue;
+      if(Math.abs(pins[i].lat-pins[j].lat)<CLUSTER_DIST &&
+         Math.abs(pins[i].lon-pins[j].lon)<CLUSTER_DIST){
+        group.push(pins[j]); used[j]=true;
+      }
+    }
+    // Centre of cluster
+    const lat = group.reduce((s,p)=>s+p.lat,0)/group.length;
+    const lon = group.reduce((s,p)=>s+p.lon,0)/group.length;
+    clusters.push({pins:group, lat, lon});
+  }
+  return clusters;
+}
+
+function makePinIcon(col="#7bafd4", size=8){
+  return L.divIcon({
+    html:`<div style="width:${size}px;height:${size}px;border-radius:50%;
+      background:${col};border:1px solid #fff;opacity:0.9"></div>`,
+    className:"", iconAnchor:[size/2,size/2]
+  });
+}
+
+function makeClusterIcon(count){
+  return L.divIcon({
+    html:`<div style="width:22px;height:22px;border-radius:50%;
+      background:#f59e0b;border:2px solid #fff;
+      display:flex;align-items:center;justify-content:center;
+      font-family:monospace;font-size:9px;font-weight:700;color:#000;
+      box-shadow:0 0 6px #f59e0baa">${count}</div>`,
+    className:"", iconAnchor:[11,11]
+  });
+}
+
+function pinPopupHtml(p){
+  const alreadyAdded = stations.some(s=>s.wma===p.wma&&s.id===p.id);
+  return `<div style="font-family:monospace;font-size:11px;min-width:165px">
+    <b style="color:#00d4aa">${p.name}</b><br/>
+    ${p.rivName?`<span style="color:#7bafd4">${p.rivName.slice(0,55)}</span><br/>`:""}
+    <span style="color:#7bafd4">WMA:</span> ${p.wma} &nbsp;
+    <span style="color:#7bafd4">ID:</span> ${p.id}<br/>
+    <span style="color:#7bafd4">Coords:</span> ${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}<br/><br/>
+    ${alreadyAdded
+      ? `<span style="color:#4ade80">✓ Already in dashboard</span>`
+      : `<button onclick="addFromMap('${p.wma}','${p.id}','${p.name.replace(/'/g,"\\'")}',${p.lat},${p.lon})"
+           style="background:#00d4aa22;border:1px solid #00d4aa;color:#00d4aa;
+           border-radius:3px;padding:3px 8px;cursor:pointer;font-family:monospace;
+           font-size:11px;width:100%">+ Add to Dashboard</button>`
+    }
+  </div>`;
+}
+
 function buildBrowseLayer(pins){
   if(browseLayer){ browseLayer.remove(); }
   browseLayer = L.layerGroup();
-  const greyIcon = L.divIcon({
-    html:`<div style="width:8px;height:8px;border-radius:50%;
-      background:#7bafd4;border:1px solid #fff;opacity:0.85"></div>`,
-    className:"", iconAnchor:[4,4]
-  });
-
-  pins.forEach(p => {
-    const alreadyAdded = stations.some(s => s.wma===p.wma && s.id===p.id);
-    const popupHtml = `
-      <div style="font-family:monospace;font-size:11px;min-width:160px">
-        <b style="color:#00d4aa">${p.name}</b><br/>
-        ${p.rivName ? `<span style="color:#7bafd4">${p.rivName}</span><br/>` : ""}
-        <span style="color:#7bafd4">WMA:</span> ${p.wma} &nbsp;
-        <span style="color:#7bafd4">ID:</span> ${p.id}<br/>
-        <span style="color:#7bafd4">Coords:</span> ${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}<br/>
-        <br/>
-        ${alreadyAdded
-          ? `<span style="color:#4ade80">✓ Already in dashboard</span>`
-          : `<button onclick="addFromMap('${p.wma}','${p.id}','${p.name.replace(/'/g,"\\'")}',${p.lat},${p.lon})"
-               style="background:#00d4aa22;border:1px solid #00d4aa;color:#00d4aa;
-               border-radius:3px;padding:3px 8px;cursor:pointer;font-family:monospace;font-size:11px;width:100%">
-               + Add to Dashboard
-             </button>`
-        }
-      </div>`;
-    const m = L.marker([p.lat,p.lon],{icon:greyIcon}).bindPopup(popupHtml,{maxWidth:220});
-    browseLayer.addLayer(m);
-  });
-
+  buildClustersIntoLayer(pins, browseLayer, lmap);
   browseLayer.addTo(lmap);
 }
 
-function addFromMap(wma, id, name, lat, lon){
+function buildLayerForMap(pins, targetMap){
+  const layer = L.layerGroup();
+  buildClustersIntoLayer(pins, layer, targetMap);
+  layer.addTo(targetMap);
+  return layer;
+}
+
+function buildClustersIntoLayer(pins, layer, targetMap){
+  const clusters = clusterPins(pins);
+  clusters.forEach(cl => {
+    if(cl.pins.length === 1){
+      // Single pin
+      const p = cl.pins[0];
+      layer.addLayer(
+        L.marker([p.lat,p.lon],{icon:makePinIcon()})
+         .bindPopup(pinPopupHtml(p),{maxWidth:230})
+      );
+    } else {
+      // Cluster pin
+      const clusterMarker = L.marker([cl.lat,cl.lon],{icon:makeClusterIcon(cl.pins.length)});
+      clusterMarker._clusterData = cl; // store for search expansion
+      clusterMarker.on("click", function(){
+        // Expand — spread pins in a circle around cluster centre
+        expandCluster(cl, layer, targetMap, clusterMarker);
+      });
+      // Cluster popup lists all stations
+      const listHtml = `
+        <div style="font-family:monospace;font-size:11px;min-width:180px">
+          <b style="color:#f59e0b">${cl.pins.length} stations at this location</b><br/>
+          <div style="color:#7bafd4;font-size:10px;margin-bottom:6px">Click pin to expand</div>
+          ${cl.pins.map(p=>`
+            <div style="padding:2px 0;border-top:1px solid #1e3a6e22">
+              <span style="color:#00d4aa">${p.name}</span>
+              ${stations.some(s=>s.wma===p.wma&&s.id===p.id)
+                ? ` <span style="color:#4ade80;font-size:10px">✓</span>`:""}
+            </div>`).join("")}
+        </div>`;
+      clusterMarker.bindPopup(listHtml,{maxWidth:230});
+      layer.addLayer(clusterMarker);
+    }
+  });
+}
+
+function expandCluster(cl, layer, targetMap, clusterMarker){
+  // Remove cluster marker
+  layer.removeLayer(clusterMarker);
+
+  // Spread pins in a circle — radius depends on zoom
+  const zoom = targetMap.getZoom();
+  const spread = Math.max(0.003, 0.015 / Math.pow(2, zoom-8));
+  const n = cl.pins.length;
+
+  cl.pins.forEach((p, i) => {
+    const angle = (2 * Math.PI * i) / n;
+    const eLat  = cl.lat + spread * Math.cos(angle);
+    const eLon  = cl.lon + spread * Math.sin(angle) * 1.5; // wider E-W
+    const m = L.marker([eLat, eLon], {icon:makePinIcon("#a78bfa", 10)})
+               .bindPopup(pinPopupHtml(p),{maxWidth:230});
+    layer.addLayer(m);
+    m.openPopup();
+  });
+
+  // Zoom in to see them
+  targetMap.setView([cl.lat, cl.lon], Math.max(targetMap.getZoom(), 13));
+}
   if(stations.some(s=>s.wma===wma&&s.id===id)){
     alert("Station already in dashboard"); return;
   }
@@ -1060,37 +1158,6 @@ function closeFullscreen(){
   if(fsBrowseLayer){ fsBrowseLayer.remove(); fsBrowseLayer=null; }
 }
 
-// Build a Leaflet LayerGroup of station pins for a given map instance
-function buildLayerForMap(pins, targetMap){
-  const layer = L.layerGroup();
-  const greyIcon = L.divIcon({
-    html:`<div style="width:8px;height:8px;border-radius:50%;
-      background:#7bafd4;border:1px solid #fff;opacity:0.85"></div>`,
-    className:"", iconAnchor:[4,4]
-  });
-  pins.forEach(p => {
-    const alreadyAdded = stations.some(s => s.wma===p.wma && s.id===p.id);
-    const popupHtml = `
-      <div style="font-family:monospace;font-size:11px;min-width:160px">
-        <b style="color:#00d4aa">${p.name}</b><br/>
-        ${p.rivName?`<span style="color:#7bafd4">${p.rivName.slice(0,50)}</span><br/>`:""}
-        <span style="color:#7bafd4">WMA:</span> ${p.wma} &nbsp;
-        <span style="color:#7bafd4">ID:</span> ${p.id}<br/>
-        <span style="color:#7bafd4">Coords:</span> ${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}<br/><br/>
-        ${alreadyAdded
-          ? `<span style="color:#4ade80">✓ Already in dashboard</span>`
-          : `<button onclick="addFromMap('${p.wma}','${p.id}','${p.name.replace(/'/g,"\\'")}',${p.lat},${p.lon})"
-               style="background:#00d4aa22;border:1px solid #00d4aa;color:#00d4aa;
-               border-radius:3px;padding:3px 8px;cursor:pointer;font-family:monospace;
-               font-size:11px;width:100%">+ Add to Dashboard</button>`
-        }
-      </div>`;
-    layer.addLayer(L.marker([p.lat,p.lon],{icon:greyIcon}).bindPopup(popupHtml,{maxWidth:220}));
-  });
-  layer.addTo(targetMap);
-  return layer;
-}
-
 // ── Station search ────────────────────────────────────────────────────────────
 let allPinsCache = [];  // populated when browse layer loads
 
@@ -1137,7 +1204,6 @@ function clearSearch(ctx){
 }
 
 function selectPin(lat, lon, wma, id, name, ctx){
-  // Close search results and clear input
   const res = document.getElementById(`search-results-${ctx}`);
   if(res) res.style.display="none";
   const inp = document.getElementById(`stn-search-${ctx}`);
@@ -1145,17 +1211,28 @@ function selectPin(lat, lon, wma, id, name, ctx){
   const clr = document.getElementById(`search-clear-${ctx}`);
   if(clr) clr.style.display="block";
 
-  // Zoom the right map
-  const targetMap = ctx==="fs" ? fsMap : lmap;
-  if(targetMap) targetMap.setView([lat, lon], 12);
-
-  // Open the popup on the right layer
+  const targetMap   = ctx==="fs" ? fsMap : lmap;
   const targetLayer = ctx==="fs" ? fsBrowseLayer : browseLayer;
+  if(!targetMap) return;
+
+  // Zoom to location
+  targetMap.setView([lat, lon], 13);
+
+  // Look for the pin — it may be inside a cluster marker
+  // First try direct pin match
+  let found = false;
   if(targetLayer){
     targetLayer.eachLayer(m=>{
+      if(found) return;
       const ll = m.getLatLng();
-      if(Math.abs(ll.lat-lat)<0.001 && Math.abs(ll.lng-lon)<0.001){
-        m.openPopup();
+      if(Math.abs(ll.lat-lat)<CLUSTER_DIST && Math.abs(ll.lng-lon)<CLUSTER_DIST){
+        // Check if this is a cluster marker (has _clusterData)
+        if(m._clusterData){
+          expandCluster(m._clusterData, targetLayer, targetMap, m);
+        } else {
+          m.openPopup();
+        }
+        found = true;
       }
     });
   }
