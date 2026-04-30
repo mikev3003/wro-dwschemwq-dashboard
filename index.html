@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WRO · DWS Chemical Water Quality Dashboard</title>
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+
+  <!-- React + Babel (no build step needed) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+
+  <!-- Recharts -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/recharts/2.10.3/Recharts.min.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #root { height: 100%; width: 100%; overflow: hidden; }
+    body { font-family: 'IBM Plex Mono', 'Courier New', monospace; background: #0a1628; color: #e8f4fd; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0a1628; }
+    ::-webkit-scrollbar-thumb { background: #1e3a6e; border-radius: 3px; }
+    input, button { font-family: inherit; }
+    a { color: #4fc3f7; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useCallback, useRef, useEffect } = React;
+const {
+  LineChart, Line, XAxis, YAxis, CartesianGrid,
+  Tooltip, ResponsiveContainer, ReferenceLine
+} = Recharts;
+
+// ── Theme ─────────────────────────────────────────────────────────────────────
+const C = {
+  bg: "#0a1628", surface: "#0f2040", card: "#122448", border: "#1e3a6e",
+  accent: "#00d4aa", accent2: "#4fc3f7", warn: "#ffb347",
+  danger: "#ff5c5c", text: "#e8f4fd", muted: "#7bafd4", good: "#4ade80",
+};
+
+// ── DWS helpers ───────────────────────────────────────────────────────────────
+function buildUrl(wma, stnno, proxyBase) {
+  const direct = `https://www.dws.gov.za/iwqs/wms/data/${wma}/${wma}_${stnno}.zip`;
+  if (!proxyBase) return direct;
+  return `${proxyBase.replace(/\/$/, "")}/proxy?url=${encodeURIComponent(direct)}`;
+}
+
+// SA Water Quality Guidelines (TWQR domestic use)
+const PARAM_META = {
+  EC:        { label: "EC (mS/m)",          unit: "mS/m",  twqr: [0, 70],   color: "#4fc3f7" },
+  PH:        { label: "pH",                  unit: "",      twqr: [6, 9],    color: "#a78bfa" },
+  TURB:      { label: "Turbidity (NTU)",     unit: "NTU",   twqr: [0, 1],    color: "#fb923c" },
+  CHLORIDE:  { label: "Chloride (mg/L)",     unit: "mg/L",  twqr: [0, 100],  color: "#34d399" },
+  SODIUM:    { label: "Sodium (mg/L)",       unit: "mg/L",  twqr: [0, 100],  color: "#f472b6" },
+  NITRATE:   { label: "Nitrate (mg/L)",      unit: "mg/L",  twqr: [0, 6],    color: "#facc15" },
+  PHOSPHATE: { label: "Phosphate (mg/L)",    unit: "mg/L",  twqr: [0, 1],    color: "#f87171" },
+  TDS:       { label: "TDS (mg/L)",          unit: "mg/L",  twqr: [0, 450],  color: "#60a5fa" },
+  CALCIUM:   { label: "Calcium (mg/L)",      unit: "mg/L",  twqr: [0, 80],   color: "#c084fc" },
+  SULPHATE:  { label: "Sulphate (mg/L)",     unit: "mg/L",  twqr: [0, 200],  color: "#2dd4bf" },
+  COD:       { label: "COD (mg/L)",          unit: "mg/L",  twqr: [0, 10],   color: "#fb7185" },
+  DO:        { label: "Dissolved O₂ (mg/L)", unit: "mg/L",  twqr: [6, 100],  color: "#86efac" },
+  FLUORIDE:  { label: "Fluoride (mg/L)",     unit: "mg/L",  twqr: [0, 1],    color: "#fbbf24" },
+  MAGNESIUM: { label: "Magnesium (mg/L)",    unit: "mg/L",  twqr: [0, 70],   color: "#a3e635" },
+  POTASSIUM: { label: "Potassium (mg/L)",    unit: "mg/L",  twqr: [0, 50],   color: "#e879f9" },
+};
+
+// ── ZIP parser (no library, pure browser APIs) ─────────────────────────────────
+async function fetchAndParseZip(url) {
+  const resp = await fetch(url, { mode: "cors" });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status} — ${resp.statusText}`);
+  const buf = await resp.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  const view  = new DataView(buf);
+
+  // Find End-of-Central-Directory
+  let eocd = -1;
+  for (let i = bytes.length - 22; i >= 0; i--) {
+    if (bytes[i]===0x50 && bytes[i+1]===0x4b && bytes[i+2]===0x05 && bytes[i+3]===0x06) {
+      eocd = i; break;
+    }
+  }
+  if (eocd < 0) throw new Error("Not a valid ZIP file");
+
+  const cdOffset = view.getUint32(eocd + 16, true);
+  const numFiles = view.getUint16(eocd + 8,  true);
+
+  const files = [];
+  let pos = cdOffset;
+  for (let f = 0; f < numFiles; f++) {
+    const fnLen    = view.getUint16(pos + 28, true);
+    const extraLen = view.getUint16(pos + 30, true);
+    const cmtLen   = view.getUint16(pos + 32, true);
+    const method   = view.getUint16(pos + 10, true);
+    const compSz   = view.getUint32(pos + 20, true);
+    const localOff = view.getUint32(pos + 42, true);
+    const name     = new TextDecoder().decode(bytes.slice(pos+46, pos+46+fnLen));
+    files.push({ name, method, compSz, localOff });
+    pos += 46 + fnLen + extraLen + cmtLen;
+  }
+
+  const csvFiles = files.filter(f => /\.(csv|txt)$/i.test(f.name));
+  if (!csvFiles.length) throw new Error("No CSV found inside ZIP");
+
+  const results = {};
+  for (const file of csvFiles) {
+    const fnLen2    = view.getUint16(file.localOff + 26, true);
+    const exLen2    = view.getUint16(file.localOff + 28, true);
+    const dataStart = file.localOff + 30 + fnLen2 + exLen2;
+    const compData  = bytes.slice(dataStart, dataStart + file.compSz);
+
+    let text;
+    if (file.method === 0) {
+      text = new TextDecoder("latin1").decode(compData);
+    } else if (file.method === 8) {
+      const ds = new DecompressionStream("deflate-raw");
+      const writer = ds.writable.getWriter();
+      writer.write(compData);
+      writer.close();
+      const chunks = [];
+      const reader = ds.readable.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+      }
+      const out = new Uint8Array(chunks.reduce((s,c)=>s+c.length,0));
+      let off = 0;
+      for (const c of chunks) { out.set(c, off); off += c.length; }
+      text = new TextDecoder("latin1").decode(out);
+    } else {
+      throw new Error(`Unsupported ZIP compression method: ${file.method}`);
+    }
+    results[file.name] = text;
+  }
+  return results;
+}
+
+function parseDWSCsv(text) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  if (lines.length < 2) return { headers: [], rows: [] };
+  const parseRow = l => l.split(",").map(v => v.replace(/^"|"$/g,"").trim());
+  const headers = parseRow(lines[0]);
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const vals = parseRow(lines[i]);
+    if (vals.length < 2) continue;
+    const row = {};
+    headers.forEach((h, idx) => { row[h] = vals[idx] ?? ""; });
+    rows.push(row);
+  }
+  return { headers, rows };
+}
+
+function buildTimeSeries(rows, headers) {
+  const dateCol = headers.find(h => /date/i.test(h));
+  const paramKeys = Object.keys(PARAM_META);
+  const matched = headers.filter(h => paramKeys.some(p => h.toUpperCase().includes(p)));
+  const series = {};
+  matched.forEach(h => { series[h] = []; });
+  for (const row of rows) {
+    const date = new Date(row[dateCol] || "");
+    if (isNaN(date)) continue;
+    for (const h of matched) {
+      const v = parseFloat(row[h]);
+      if (!isNaN(v)) series[h].push({ date: date.toISOString().slice(0,10), value: v, dateObj: date });
+    }
+  }
+  return { series, matched };
+}
+
+function getParamMeta(col) {
+  const up = col.toUpperCase();
+  for (const [k, m] of Object.entries(PARAM_META)) {
+    if (up.includes(k)) return { ...m, key: k };
+  }
+  return { label: col, unit: "", twqr: null, color: "#7bafd4", key: col };
+}
+
+function exceedanceRate(data, twqr) {
+  if (!twqr || !data.length) return null;
+  return Math.round(data.filter(d => d.value < twqr[0] || d.value > twqr[1]).length / data.length * 100);
+}
+
+// ── Leaflet Map Component ─────────────────────────────────────────────────────
+function StationMap({ stations }) {
+  const mapRef = useRef(null);
+  const leafletMap = useRef(null);
+  const markersRef = useRef([]);
+
+  useEffect(() => {
+    if (!mapRef.current) return;
+    if (!leafletMap.current) {
+      leafletMap.current = L.map(mapRef.current, { zoomControl: true }).setView([-29, 25], 5);
+      L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+        attribution: "© CartoDB", maxZoom: 19
+      }).addTo(leafletMap.current);
+    }
+    // Clear old markers
+    markersRef.current.forEach(m => m.remove());
+    markersRef.current = [];
+
+    const pts = [];
+    stations.forEach(s => {
+      if (!s.lat || !s.lon) return;
+      const color = s.loaded ? "#00d4aa" : "#4fc3f7";
+      const icon = L.divIcon({
+        html: `<div style="width:12px;height:12px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 0 8px ${color}"></div>`,
+        className: "", iconAnchor: [6, 6]
+      });
+      const m = L.marker([s.lat, s.lon], { icon })
+        .bindPopup(`<b>${s.name}</b><br/>Station: ${s.id}<br/>WMA: ${s.wma}`)
+        .addTo(leafletMap.current);
+      markersRef.current.push(m);
+      pts.push([s.lat, s.lon]);
+    });
+    if (pts.length > 0) {
+      leafletMap.current.fitBounds(pts, { padding: [30, 30] });
+    }
+  }, [stations]);
+
+  return <div ref={mapRef} style={{ width: "100%", height: "100%", borderRadius: 8 }} />;
+}
+
+// ── Shared styles ─────────────────────────────────────────────────────────────
+const inputSt = {
+  flex: 1, padding: "5px 8px", background: "#0a1628",
+  border: `1px solid #1e3a6e`, borderRadius: 4,
+  color: "#e8f4fd", fontSize: 11, minWidth: 0, outline: "none"
+};
+const btnSt = (active) => ({
+  padding: "5px 12px", background: active ? "#00d4aa22" : "transparent",
+  border: `1px solid ${active ? "#00d4aa" : "#1e3a6e"}`,
+  color: active ? "#00d4aa" : "#7bafd4",
+  borderRadius: 4, cursor: "pointer", fontSize: 11, letterSpacing: 0.5
+});
+
+// ── Main Dashboard ────────────────────────────────────────────────────────────
+function WRODashboard() {
+  const [stations, setStations] = useState([
+    { id: "90162", wma: "A21", name: "A21_90162", lat: null, lon: null, loaded: false, error: null, data: null }
+  ]);
+  const [activeIdx, setActiveIdx]     = useState(0);
+  const [activeParam, setActiveParam] = useState(null);
+  const [loading, setLoading]         = useState(false);
+  const [proxyUrl, setProxyUrl]       = useState("");
+  const [showSettings, setShowSettings] = useState(false);
+  const [proxyStatus, setProxyStatus] = useState(null);
+
+  // Add station form
+  const [fWma,  setFWma]  = useState("A21");
+  const [fStn,  setFStn]  = useState("");
+  const [fName, setFName] = useState("");
+  const [fLat,  setFLat]  = useState("");
+  const [fLon,  setFLon]  = useState("");
+
+  const checkProxy = useCallback(async (url) => {
+    if (!url) { setProxyStatus(null); return; }
+    setProxyStatus("checking");
+    try {
+      const r = await fetch(`${url.replace(/\/$/,"")}/health`, { signal: AbortSignal.timeout(5000) });
+      const j = await r.json();
+      setProxyStatus(j.status === "ok" ? "ok" : "fail");
+    } catch { setProxyStatus("fail"); }
+  }, []);
+
+  const loadStation = useCallback(async (idx) => {
+    const stn = stations[idx];
+    setLoading(true);
+    try {
+      const url = buildUrl(stn.wma, stn.id, proxyUrl);
+      const files = await fetchAndParseZip(url);
+      const csvName = Object.keys(files)[0];
+      const { headers, rows } = parseDWSCsv(files[csvName]);
+      const { series, matched } = buildTimeSeries(rows, headers);
+
+      // Try to extract lat/lon from data
+      let lat = stn.lat, lon = stn.lon;
+      const latCol = headers.find(h => /^lat/i.test(h));
+      const lonCol = headers.find(h => /^lon|^lng/i.test(h));
+      if (latCol && rows[0]) lat = parseFloat(rows[0][latCol]) || lat;
+      if (lonCol && rows[0]) lon = parseFloat(rows[0][lonCol]) || lon;
+
+      setStations(prev => prev.map((s, i) => i !== idx ? s : {
+        ...s, loaded: true, error: null, lat, lon,
+        data: { headers, rows, series, matched, csvName, rowCount: rows.length }
+      }));
+      if (!activeParam && matched.length > 0) setActiveParam(matched[0]);
+    } catch (e) {
+      setStations(prev => prev.map((s, i) => i !== idx ? s : { ...s, error: e.message }));
+    }
+    setLoading(false);
+  }, [stations, proxyUrl, activeParam]);
+
+  const addStation = () => {
+    if (!fWma || !fStn) return;
+    setStations(prev => [...prev, {
+      id: fStn.trim(), wma: fWma.trim().toUpperCase(),
+      name: fName.trim() || `${fWma.toUpperCase()}_${fStn.trim()}`,
+      lat: parseFloat(fLat) || null, lon: parseFloat(fLon) || null,
+      loaded: false, error: null, data: null
+    }]);
+    setFStn(""); setFName(""); setFLat(""); setFLon("");
+  };
+
+  const removeStation = (idx) => {
+    setStations(prev => prev.filter((_, i) => i !== idx));
+    if (activeIdx >= idx) setActiveIdx(Math.max(0, activeIdx - 1));
+  };
+
+  const current   = stations[activeIdx];
+  const paramData = current?.data?.series[activeParam] ?? [];
+  const meta      = activeParam ? getParamMeta(activeParam) : null;
+  const chartData = [...paramData].sort((a,b) => a.dateObj - b.dateObj);
+
+  const stats = paramData.length > 0 ? {
+    n:      paramData.length,
+    mean:   (paramData.reduce((s,d)=>s+d.value,0)/paramData.length).toFixed(2),
+    min:    Math.min(...paramData.map(d=>d.value)).toFixed(2),
+    max:    Math.max(...paramData.map(d=>d.value)).toFixed(2),
+    exceed: meta?.twqr ? exceedanceRate(paramData, meta.twqr) : null
+  } : null;
+
+  const proxyBadgeColor = proxyStatus === "ok" ? C.good : proxyStatus === "fail" ? C.danger : C.warn;
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", height:"100vh", background:C.bg, color:C.text, fontSize:12 }}>
+
+      {/* ── Header ── */}
+      <div style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 20px",
+        background:`linear-gradient(135deg,${C.surface},${C.bg})`,
+        borderBottom:`1px solid ${C.border}`, flexShrink:0 }}>
+        <div style={{ width:32, height:32, borderRadius:"50%",
+          background:`radial-gradient(circle,${C.accent},${C.accent2})`,
+          display:"flex", alignItems:"center", justifyContent:"center", fontSize:16 }}>💧</div>
+        <div>
+          <div style={{ fontSize:15, fontWeight:700, letterSpacing:1, color:C.accent }}>
+            WRO · DWS CHEMICAL WATER QUALITY
+          </div>
+          <div style={{ fontSize:10, color:C.muted }}>
+            Resource Quality Information Services · Automated data harvest
+          </div>
+        </div>
+        <div style={{ marginLeft:"auto", display:"flex", gap:8, alignItems:"center" }}>
+          <span style={{ fontSize:10, color:C.muted }}>
+            {stations.filter(s=>s.loaded).length}/{stations.length} loaded
+          </span>
+          {proxyUrl && (
+            <span style={{ fontSize:10, padding:"2px 8px", borderRadius:10,
+              border:`1px solid ${proxyBadgeColor}`, color:proxyBadgeColor }}>
+              ● PROXY {proxyStatus === "ok" ? "OK" : proxyStatus === "fail" ? "FAIL" : "…"}
+            </span>
+          )}
+          <button onClick={() => setShowSettings(s=>!s)}
+            style={{ ...btnSt(showSettings), padding:"4px 10px" }}>⚙ Settings</button>
+        </div>
+      </div>
+
+      {/* ── Settings panel ── */}
+      {showSettings && (
+        <div style={{ background:C.surface, borderBottom:`1px solid ${C.border}`,
+          padding:"12px 20px", flexShrink:0, display:"flex", gap:12, alignItems:"flex-end", flexWrap:"wrap" }}>
+          <div style={{ flex:1, minWidth:280 }}>
+            <div style={{ fontSize:10, color:C.muted, marginBottom:4, letterSpacing:1 }}>CORS PROXY URL</div>
+            <div style={{ display:"flex", gap:6 }}>
+              <input value={proxyUrl} onChange={e=>setProxyUrl(e.target.value)}
+                placeholder="https://your-worker.workers.dev  (leave blank to try direct)"
+                style={{ ...inputSt, flex:1 }} />
+              <button onClick={()=>checkProxy(proxyUrl)} style={btnSt(false)}>Test</button>
+              <button onClick={()=>{setProxyUrl("");setProxyStatus(null);}}
+                style={{ ...btnSt(false), color:C.muted }}>Clear</button>
+            </div>
+          </div>
+          <div style={{ fontSize:10, color:C.muted, lineHeight:1.8,
+            background:C.card, border:`1px solid ${C.border}`, borderRadius:6, padding:"8px 12px" }}>
+            <span style={{ color:C.accent2 }}>Deploy free Cloudflare proxy:</span><br/>
+            workers.cloudflare.com → Create Worker → paste <code style={{color:C.accent}}>cors-proxy-cloudflare.js</code>
+          </div>
+        </div>
+      )}
+
+      {/* ── Body ── */}
+      <div style={{ display:"flex", flex:1, overflow:"hidden" }}>
+
+        {/* ── Sidebar ── */}
+        <div style={{ width:260, borderRight:`1px solid ${C.border}`,
+          background:C.surface, display:"flex", flexDirection:"column", overflow:"hidden" }}>
+
+          {/* Add station form */}
+          <div style={{ padding:12, borderBottom:`1px solid ${C.border}`, flexShrink:0 }}>
+            <div style={{ fontSize:10, color:C.accent, fontWeight:700, marginBottom:8, letterSpacing:1 }}>
+              + ADD STATION
+            </div>
+            <div style={{ display:"flex", gap:4, marginBottom:4 }}>
+              <input value={fWma} onChange={e=>setFWma(e.target.value)}
+                placeholder="WMA (e.g. A21)" style={{ ...inputSt, width:90 }} />
+              <input value={fStn} onChange={e=>setFStn(e.target.value)}
+                placeholder="Station no." style={inputSt} />
+            </div>
+            <input value={fName} onChange={e=>setFName(e.target.value)}
+              placeholder="Label (optional)" style={{ ...inputSt, width:"100%", marginBottom:4 }} />
+            <div style={{ display:"flex", gap:4, marginBottom:6 }}>
+              <input value={fLat} onChange={e=>setFLat(e.target.value)}
+                placeholder="Lat" type="number" style={inputSt} />
+              <input value={fLon} onChange={e=>setFLon(e.target.value)}
+                placeholder="Lon" type="number" style={inputSt} />
+            </div>
+            <button onClick={addStation}
+              style={{ width:"100%", padding:"6px", background:"transparent",
+                border:`1px solid ${C.accent}`, color:C.accent,
+                borderRadius:4, cursor:"pointer", fontSize:11, letterSpacing:0.5 }}>
+              Add Station
+            </button>
+          </div>
+
+          {/* Station list */}
+          <div style={{ flex:1, overflowY:"auto" }}>
+            <div style={{ fontSize:10, color:C.muted, padding:"8px 12px 4px", letterSpacing:1 }}>
+              MONITORING STATIONS
+            </div>
+            {stations.map((stn, idx) => (
+              <div key={idx} onClick={() => setActiveIdx(idx)}
+                style={{ padding:"10px 12px", cursor:"pointer",
+                  borderLeft:`3px solid ${idx===activeIdx ? C.accent : "transparent"}`,
+                  background: idx===activeIdx ? `${C.card}88` : "transparent",
+                  borderBottom:`1px solid ${C.border}20` }}>
+                <div style={{ display:"flex", justifyContent:"space-between" }}>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontWeight:700, color: idx===activeIdx ? C.accent : C.text, marginBottom:2 }}>
+                      {stn.name}
+                    </div>
+                    <div style={{ fontSize:10, color:C.muted }}>{stn.wma}_{stn.id}</div>
+                    {stn.data && (
+                      <div style={{ fontSize:10, color:C.good, marginTop:2 }}>
+                        ✓ {stn.data.rowCount} samples · {stn.data.matched.length} params
+                      </div>
+                    )}
+                    {stn.error && (
+                      <div style={{ fontSize:10, color:C.danger, marginTop:2 }}>✗ {stn.error}</div>
+                    )}
+                  </div>
+                  <button onClick={e=>{e.stopPropagation();removeStation(idx);}}
+                    style={{ background:"none", border:"none", color:C.muted, cursor:"pointer", fontSize:16, paddingLeft:6 }}>×</button>
+                </div>
+                {!stn.loaded && !stn.error && (
+                  <button onClick={e=>{e.stopPropagation();loadStation(idx);}}
+                    disabled={loading}
+                    style={{ marginTop:6, width:"100%", padding:"4px", background:"transparent",
+                      border:`1px solid ${C.accent2}`, color:C.accent2,
+                      borderRadius:4, cursor:"pointer", fontSize:10 }}>
+                    {loading && idx===activeIdx ? "Loading…" : "↓ Fetch Data"}
+                  </button>
+                )}
+                {stn.loaded && (
+                  <button onClick={e=>{e.stopPropagation();
+                    setStations(prev=>prev.map((s,i)=>i!==idx?s:{...s,loaded:false,error:null,data:null}));
+                  }}
+                    style={{ marginTop:4, width:"100%", padding:"3px", background:"transparent",
+                      border:`1px solid ${C.border}`, color:C.muted,
+                      borderRadius:4, cursor:"pointer", fontSize:9 }}>
+                    ↺ Reload
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Parameter picker */}
+          {current?.data && (
+            <div style={{ padding:10, borderTop:`1px solid ${C.border}`, flexShrink:0 }}>
+              <div style={{ fontSize:10, color:C.muted, marginBottom:6, letterSpacing:1 }}>PARAMETERS</div>
+              <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
+                {current.data.matched.map(p => {
+                  const pm = getParamMeta(p);
+                  const exc = pm.twqr ? exceedanceRate(current.data.series[p], pm.twqr) : null;
+                  return (
+                    <button key={p} onClick={()=>setActiveParam(p)}
+                      style={{ padding:"3px 7px", fontSize:10, cursor:"pointer", fontFamily:"inherit",
+                        background: activeParam===p ? pm.color : `${pm.color}22`,
+                        color: activeParam===p ? "#000" : pm.color,
+                        border:`1px solid ${pm.color}66`, borderRadius:4 }}>
+                      {pm.key}
+                      {exc !== null && exc > 0 && (
+                        <span style={{ marginLeft:3, color: activeParam===p ? "#000" : C.danger }}>
+                          {exc}%⚠
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Main panel ── */}
+        <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden" }}>
+
+          {/* Map + Stats row */}
+          <div style={{ display:"flex", height:270, borderBottom:`1px solid ${C.border}`, flexShrink:0 }}>
+
+            {/* Map */}
+            <div style={{ flex:1, padding:12 }}>
+              <div style={{ fontSize:10, color:C.muted, marginBottom:6, letterSpacing:1 }}>
+                STATION MAP
+              </div>
+              <div style={{ height:218, border:`1px solid ${C.border}`, borderRadius:8, overflow:"hidden" }}>
+                <StationMap stations={stations} />
+              </div>
+            </div>
+
+            {/* Stats */}
+            <div style={{ width:240, padding:12, borderLeft:`1px solid ${C.border}` }}>
+              <div style={{ fontSize:10, color:C.muted, marginBottom:10, letterSpacing:1 }}>
+                STATISTICS {activeParam ? `· ${getParamMeta(activeParam).key}` : ""}
+              </div>
+              {stats ? (
+                <>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:6 }}>
+                    {[
+                      ["SAMPLES", stats.n],
+                      ["MEAN",    `${stats.mean} ${meta?.unit||""}`],
+                      ["MIN",     `${stats.min} ${meta?.unit||""}`],
+                      ["MAX",     `${stats.max} ${meta?.unit||""}`],
+                    ].map(([l,v]) => (
+                      <div key={l} style={{ background:C.card, borderRadius:6, padding:"6px 8px",
+                        border:`1px solid ${C.border}` }}>
+                        <div style={{ fontSize:9, color:C.muted, marginBottom:2 }}>{l}</div>
+                        <div style={{ fontSize:13, fontWeight:700, color:C.accent }}>{v}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {stats.exceed !== null && (
+                    <div style={{
+                      borderRadius:6, padding:"8px 10px",
+                      background: stats.exceed > 20 ? `${C.danger}22` : `${C.good}22`,
+                      border:`1px solid ${stats.exceed > 20 ? C.danger : C.good}`
+                    }}>
+                      <div style={{ fontSize:9, color:C.muted, marginBottom:2 }}>TWQR EXCEEDANCE</div>
+                      <div style={{ fontSize:22, fontWeight:700, color: stats.exceed > 20 ? C.danger : C.good }}>
+                        {stats.exceed}%
+                      </div>
+                      <div style={{ fontSize:9, color:C.muted }}>
+                        Target: {meta?.twqr?.[0]}–{meta?.twqr?.[1]} {meta?.unit}
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div style={{ color:C.muted, textAlign:"center", paddingTop:24, fontSize:11 }}>
+                  {current?.loaded ? "Select a parameter →" : "Fetch station data first"}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Time series chart */}
+          <div style={{ flex:1, padding:12, display:"flex", flexDirection:"column", minHeight:0 }}>
+            <div style={{ fontSize:10, color:C.muted, marginBottom:6, letterSpacing:1 }}>
+              TIME SERIES{meta ? ` · ${meta.label}` : ""}{current ? ` · ${current.name}` : ""}
+            </div>
+            {chartData.length > 0 ? (
+              <div style={{ flex:1, minHeight:0 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={chartData} margin={{top:4,right:16,left:0,bottom:4}}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={`${C.border}66`} />
+                    <XAxis dataKey="date" tick={{fill:C.muted,fontSize:9}}
+                      tickFormatter={d=>d.slice(0,7)} interval="preserveStartEnd" />
+                    <YAxis tick={{fill:C.muted,fontSize:9}} width={55} />
+                    <Tooltip
+                      contentStyle={{background:C.card,border:`1px solid ${C.border}`,
+                        borderRadius:6,fontFamily:"inherit",fontSize:11}}
+                      labelStyle={{color:C.muted}}
+                      itemStyle={{color:meta?.color||C.accent2}}
+                      formatter={v=>[`${v} ${meta?.unit||""}`, meta?.key||activeParam]}
+                    />
+                    {meta?.twqr && <>
+                      <ReferenceLine y={meta.twqr[1]} stroke={C.warn} strokeDasharray="6 3"
+                        label={{value:`max ${meta.twqr[1]}`,fill:C.warn,fontSize:9,position:"insideTopRight"}}/>
+                      {meta.twqr[0] > 0 &&
+                        <ReferenceLine y={meta.twqr[0]} stroke={C.warn} strokeDasharray="6 3"
+                          label={{value:`min ${meta.twqr[0]}`,fill:C.warn,fontSize:9,position:"insideBottomRight"}}/>
+                      }
+                    </>}
+                    <Line type="monotone" dataKey="value"
+                      stroke={meta?.color||C.accent2}
+                      dot={{r:2,fill:meta?.color||C.accent2,strokeWidth:0}}
+                      activeDot={{r:5}} strokeWidth={1.5} connectNulls />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div style={{ flex:1, display:"flex", flexDirection:"column",
+                alignItems:"center", justifyContent:"center", color:C.muted }}>
+                {!current?.loaded ? (
+                  <>
+                    <div style={{ fontSize:36, marginBottom:10 }}>📡</div>
+                    <div style={{ marginBottom:6 }}>No data loaded yet</div>
+                    <div style={{ fontSize:10, textAlign:"center", maxWidth:280, marginBottom:14 }}>
+                      Add a DWS station (WMA code + station number) and click "↓ Fetch Data"
+                    </div>
+                    <button onClick={()=>loadStation(activeIdx)} disabled={loading}
+                      style={{ padding:"8px 20px", background:"transparent",
+                        border:`1px solid ${C.accent}`, color:C.accent,
+                        borderRadius:4, cursor:"pointer", fontSize:11 }}>
+                      {loading ? "Fetching…" : "↓ Fetch Station Data"}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ fontSize:36, marginBottom:10 }}>📊</div>
+                    <div>Select a parameter from the left panel</div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Parameter overview bar */}
+          {current?.data && current.data.matched.length > 0 && (
+            <div style={{ borderTop:`1px solid ${C.border}`, padding:"8px 12px",
+              display:"flex", gap:6, overflowX:"auto", flexShrink:0 }}>
+              <span style={{ fontSize:10, color:C.muted, whiteSpace:"nowrap", paddingTop:5 }}>ALL PARAMS:</span>
+              {current.data.matched.map(p => {
+                const pm = getParamMeta(p);
+                const d  = current.data.series[p];
+                const exc = pm.twqr ? exceedanceRate(d, pm.twqr) : null;
+                const last = d.length ? d[d.length-1]?.value?.toFixed(1) : null;
+                return (
+                  <div key={p} onClick={()=>setActiveParam(p)}
+                    style={{ flexShrink:0, cursor:"pointer", borderRadius:6, padding:"4px 10px",
+                      background: activeParam===p ? `${pm.color}33` : C.card,
+                      border:`1px solid ${activeParam===p ? pm.color : C.border}`,
+                      display:"flex", flexDirection:"column", alignItems:"center" }}>
+                    <div style={{ fontSize:9, color:pm.color, fontWeight:700 }}>{pm.key}</div>
+                    {last && <div style={{ fontSize:12, fontWeight:700 }}>{last}</div>}
+                    {exc !== null && (
+                      <div style={{ fontSize:9, color: exc>20 ? C.danger : C.good }}>{exc}%</div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Footer ── */}
+      <div style={{ borderTop:`1px solid ${C.border}`, padding:"6px 20px",
+        fontSize:10, color:C.muted, display:"flex", justifyContent:"space-between", flexShrink:0 }}>
+        <span>Data: DWS RQIS · <a href="https://www.dws.gov.za/iwqs/wms/data/" target="_blank">dws.gov.za/iwqs/wms/data</a></span>
+        <span>WRO Dashboard · TWQR = Target Water Quality Range (SA Guidelines, Domestic Use)</span>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<WRODashboard />);
+</script>
+</body>
+</html>
