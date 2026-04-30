@@ -3,559 +3,516 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>WRO · DWS Chemical Water Quality Dashboard</title>
-
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
-
+  <title>WRO · DWS Chemical Water Quality</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body { height: 100%; width: 100%; background: #0a1628; color: #e8f4fd;
-      font-family: 'IBM Plex Mono', 'Courier New', monospace; font-size: 12px; overflow: hidden; }
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: #0a1628; }
+    html, body { height: 100%; background: #0a1628; color: #e8f4fd;
+      font-family: 'Courier New', monospace; font-size: 12px; }
+    ::-webkit-scrollbar { width: 5px; }
     ::-webkit-scrollbar-thumb { background: #1e3a6e; border-radius: 3px; }
     a { color: #4fc3f7; }
 
-    #app { display: flex; flex-direction: column; height: 100vh; }
-    #header { display: flex; align-items: center; gap: 12px; padding: 10px 18px;
-      background: linear-gradient(135deg, #0f2040, #0a1628);
-      border-bottom: 1px solid #1e3a6e; flex-shrink: 0; }
-    #settings-panel { background: #0f2040; border-bottom: 1px solid #1e3a6e;
-      padding: 10px 18px; display: none; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
-    #settings-panel.open { display: flex; }
-    #body { display: flex; flex: 1; overflow: hidden; }
-    #sidebar { width: 260px; border-right: 1px solid #1e3a6e; background: #0f2040;
-      display: flex; flex-direction: column; overflow: hidden; }
-    #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-    #map-stats-row { display: flex; height: 260px; border-bottom: 1px solid #1e3a6e; flex-shrink: 0; }
-    #map-wrap { flex: 1; padding: 10px; }
-    #map { width: 100%; height: 210px; border: 1px solid #1e3a6e; border-radius: 6px; }
-    #stats-wrap { width: 230px; padding: 10px; border-left: 1px solid #1e3a6e; overflow-y: auto; }
-    #chart-area { flex: 1; padding: 10px; display: flex; flex-direction: column; min-height: 0; }
-    #chart-wrap { flex: 1; position: relative; min-height: 0; }
-    #params-bar { border-top: 1px solid #1e3a6e; padding: 7px 10px;
-      display: flex; gap: 5px; overflow-x: auto; flex-shrink: 0; align-items: center; }
-    #footer { border-top: 1px solid #1e3a6e; padding: 5px 18px;
-      font-size: 10px; color: #7bafd4; display: flex; justify-content: space-between; flex-shrink: 0; }
-    #add-form { padding: 10px; border-bottom: 1px solid #1e3a6e; flex-shrink: 0; }
-    #station-list { flex: 1; overflow-y: auto; }
-    #param-picker { padding: 8px 10px; border-top: 1px solid #1e3a6e; flex-shrink: 0; }
+    /* ── Layout ── */
+    #wrap   { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+    #hdr    { display: flex; align-items: center; gap: 10px; padding: 9px 16px;
+              background: #0f2040; border-bottom: 1px solid #1e3a6e; flex-shrink: 0; }
+    #setpan { display: none; padding: 9px 16px; background: #0f2040;
+              border-bottom: 1px solid #1e3a6e; flex-shrink: 0; }
+    #setpan.open { display: block; }
+    #body   { display: flex; flex: 1; min-height: 0; }
+    #side   { width: 255px; border-right: 1px solid #1e3a6e; background: #0f2040;
+              display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0; }
+    #main   { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+    #toprow { display: flex; height: 255px; border-bottom: 1px solid #1e3a6e; flex-shrink: 0; }
+    #mapbox { flex: 1; padding: 9px; }
+    #mapel  { width: 100%; height: 205px; border: 1px solid #1e3a6e; border-radius: 6px;
+              background: #122448; }
+    #statsbox { width: 225px; padding: 9px; border-left: 1px solid #1e3a6e; overflow-y: auto; flex-shrink: 0; }
+    #chartbox { flex: 1; padding: 9px; display: flex; flex-direction: column; min-height: 0; }
+    #canvaswrap { flex: 1; position: relative; min-height: 0; }
+    #myChart { display: none; }
+    #empty  { position: absolute; inset: 0; display: flex; flex-direction: column;
+              align-items: center; justify-content: center; color: #7bafd4; gap: 8px; }
+    #pbar   { display: none; border-top: 1px solid #1e3a6e; padding: 6px 9px;
+              flex-shrink: 0; overflow-x: auto; white-space: nowrap; }
+    #ftr    { border-top: 1px solid #1e3a6e; padding: 5px 16px; font-size: 10px;
+              color: #7bafd4; display: flex; justify-content: space-between; flex-shrink: 0; }
+    #addform { padding: 9px; border-bottom: 1px solid #1e3a6e; flex-shrink: 0; }
+    #stnlist { flex: 1; overflow-y: auto; }
+    #ppick  { padding: 7px 9px; border-top: 1px solid #1e3a6e; flex-shrink: 0; display: none; }
 
-    input { background: #0a1628; border: 1px solid #1e3a6e; border-radius: 4px;
-      color: #e8f4fd; padding: 4px 7px; font-family: inherit; font-size: 11px; outline: none; }
+    /* ── Controls ── */
+    input   { background: #081220; border: 1px solid #1e3a6e; border-radius: 3px;
+              color: #e8f4fd; padding: 4px 6px; font-family: inherit; font-size: 11px; outline: none; }
     input:focus { border-color: #00d4aa; }
-    .btn { background: transparent; border: 1px solid #1e3a6e; color: #7bafd4;
-      border-radius: 4px; padding: 4px 10px; cursor: pointer; font-family: inherit;
-      font-size: 11px; transition: all .15s; }
+    .btn    { background: transparent; border: 1px solid #1e3a6e; color: #7bafd4;
+              border-radius: 3px; padding: 4px 9px; cursor: pointer;
+              font-family: inherit; font-size: 11px; }
     .btn:hover { border-color: #4fc3f7; color: #4fc3f7; }
-    .btn.accent { border-color: #00d4aa; color: #00d4aa; }
-    .btn.accent:hover { background: #00d4aa22; }
-    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    .row { display: flex; gap: 5px; margin-bottom: 5px; }
-    .lbl { font-size: 10px; color: #7bafd4; letter-spacing: 1px; margin-bottom: 5px; }
+    .abtn   { border-color: #00d4aa !important; color: #00d4aa !important; }
+    .abtn:hover { background: #00d4aa22 !important; }
+    .lbl    { font-size: 10px; color: #7bafd4; letter-spacing: 1px; margin-bottom: 4px; }
+    .row    { display: flex; gap: 4px; margin-bottom: 4px; }
 
-    .stn-card { padding: 9px 11px; cursor: pointer; border-left: 3px solid transparent;
-      border-bottom: 1px solid #1e3a6e18; }
-    .stn-card:hover { background: #12244822; }
-    .stn-card.active { border-left-color: #00d4aa; background: #12244888; }
+    /* ── Station card ── */
+    .sc     { padding: 8px 10px; cursor: pointer; border-left: 3px solid transparent; }
+    .sc:hover { background: #0f204055; }
+    .sc.on  { border-left-color: #00d4aa; background: #122448aa; }
 
-    .stat-card { background: #122448; border: 1px solid #1e3a6e; border-radius: 6px;
-      padding: 7px 9px; margin-bottom: 5px; }
-    .stat-lbl { font-size: 9px; color: #7bafd4; margin-bottom: 2px; }
-    .stat-val { font-size: 14px; font-weight: 700; color: #00d4aa; }
+    /* ── Stat card ── */
+    .stc    { background: #122448; border: 1px solid #1e3a6e; border-radius: 5px;
+              padding: 6px 8px; margin-bottom: 4px; }
+    .stcl   { font-size: 9px; color: #7bafd4; }
+    .stcv   { font-size: 13px; font-weight: 700; color: #00d4aa; }
 
-    .param-btn { flex-shrink: 0; padding: 3px 8px; border-radius: 4px; cursor: pointer;
-      font-family: inherit; font-size: 10px; border: 1px solid; }
+    /* ── Param button ── */
+    .pb     { display: inline-block; padding: 2px 7px; border-radius: 3px; cursor: pointer;
+              font-size: 10px; border: 1px solid; margin: 2px; }
 
-    #empty-state { position: absolute; inset: 0; display: flex; flex-direction: column;
-      align-items: center; justify-content: center; color: #7bafd4; }
-    #proxy-badge { font-size: 10px; padding: 2px 8px; border-radius: 10px;
-      border: 1px solid; display: none; }
+    #pbadge { font-size: 10px; padding: 2px 7px; border-radius: 8px;
+              border: 1px solid; display: none; }
   </style>
 </head>
 <body>
-<div id="app">
+<div id="wrap">
 
-  <div id="header">
-    <div style="width:30px;height:30px;border-radius:50%;
-      background:radial-gradient(circle,#00d4aa,#4fc3f7);
-      display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0">💧</div>
+  <!-- Header -->
+  <div id="hdr">
+    <div style="width:28px;height:28px;border-radius:50%;flex-shrink:0;
+      background:radial-gradient(#00d4aa,#4fc3f7);display:flex;align-items:center;
+      justify-content:center;font-size:14px">💧</div>
     <div>
-      <div style="font-size:14px;font-weight:700;letter-spacing:1px;color:#00d4aa">
+      <div style="font-size:13px;font-weight:700;color:#00d4aa;letter-spacing:1px">
         WRO · DWS CHEMICAL WATER QUALITY</div>
-      <div style="font-size:10px;color:#7bafd4">
-        Resource Quality Information Services · Automated data harvest</div>
+      <div style="font-size:10px;color:#7bafd4">DWS Resource Quality Information Services · Automated harvest</div>
     </div>
-    <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
-      <span id="loaded-count" style="font-size:10px;color:#7bafd4">0/1 loaded</span>
-      <span id="proxy-badge"></span>
-      <button class="btn" id="settings-btn">⚙ Settings</button>
+    <div style="margin-left:auto;display:flex;gap:7px;align-items:center">
+      <span id="lcnt" style="font-size:10px;color:#7bafd4">0/1 loaded</span>
+      <span id="pbadge"></span>
+      <button class="btn" onclick="toggleSettings()">⚙ Settings</button>
     </div>
   </div>
 
-  <div id="settings-panel">
-    <div>
-      <div class="lbl">CORS PROXY URL</div>
-      <div class="row" style="margin:0">
-        <input id="proxy-input" style="width:340px"
-          placeholder="https://your-worker.workers.dev  (leave blank to try direct)"/>
-        <button class="btn" id="proxy-test-btn">Test</button>
-        <button class="btn" id="proxy-clear-btn">Clear</button>
-      </div>
-      <div style="font-size:10px;color:#7bafd4;margin-top:4px">
-        Deploy <code style="color:#00d4aa">cors-proxy-cloudflare.js</code> free at workers.cloudflare.com
-      </div>
+  <!-- Settings -->
+  <div id="setpan">
+    <div class="lbl">CORS PROXY URL</div>
+    <div class="row">
+      <input id="pxi" style="flex:1;max-width:380px"
+        placeholder="https://your-worker.workers.dev  (leave blank to try direct)"
+        onchange="proxyUrl=this.value.trim()"/>
+      <button class="btn" onclick="testProxy()">Test</button>
+      <button class="btn" onclick="clearProxy()">Clear</button>
+    </div>
+    <div style="font-size:10px;color:#7bafd4">
+      Free proxy: workers.cloudflare.com → Create Worker → paste <code style="color:#00d4aa">cors-proxy-cloudflare.js</code>
     </div>
   </div>
 
   <div id="body">
-    <div id="sidebar">
-      <div id="add-form">
+    <!-- Sidebar -->
+    <div id="side">
+      <div id="addform">
         <div class="lbl">+ ADD STATION</div>
         <div class="row">
-          <input id="f-wma" value="A21" style="width:75px" placeholder="WMA"/>
-          <input id="f-stn" style="flex:1" placeholder="Station no."/>
+          <input id="fw" value="A21" style="width:70px" placeholder="WMA"/>
+          <input id="fs" style="flex:1" placeholder="Station no."/>
         </div>
         <div class="row">
-          <input id="f-name" style="flex:1" placeholder="Label (optional)"/>
+          <input id="fn" style="flex:1" placeholder="Label (optional)"/>
         </div>
         <div class="row">
-          <input id="f-lat" type="number" style="flex:1" placeholder="Lat"/>
-          <input id="f-lon" type="number" style="flex:1" placeholder="Lon"/>
+          <input id="flat" type="number" style="flex:1" placeholder="Lat"/>
+          <input id="flon" type="number" style="flex:1" placeholder="Lon"/>
         </div>
-        <button class="btn accent" id="add-btn" style="width:100%">Add Station</button>
+        <button class="btn abtn" style="width:100%" onclick="addStation()">Add Station</button>
       </div>
-      <div id="station-list">
-        <div class="lbl" style="padding:7px 11px 3px">MONITORING STATIONS</div>
+
+      <div id="stnlist">
+        <div class="lbl" style="padding:6px 10px 3px">MONITORING STATIONS</div>
       </div>
-      <div id="param-picker" style="display:none">
+
+      <div id="ppick">
         <div class="lbl">PARAMETERS</div>
-        <div id="param-buttons" style="display:flex;flex-wrap:wrap;gap:4px"></div>
+        <div id="pbtns"></div>
       </div>
     </div>
 
+    <!-- Main -->
     <div id="main">
-      <div id="map-stats-row">
-        <div id="map-wrap">
+      <div id="toprow">
+        <div id="mapbox">
           <div class="lbl">STATION MAP</div>
-          <div id="map"></div>
+          <div id="mapel"></div>
         </div>
-        <div id="stats-wrap">
-          <div class="lbl" id="stats-title">STATISTICS</div>
-          <div id="stats-cards">
-            <div style="color:#7bafd4;font-size:11px;padding-top:20px;text-align:center">
-              Fetch station data first</div>
-          </div>
+        <div id="statsbox">
+          <div class="lbl" id="stitle">STATISTICS</div>
+          <div id="scards"><div style="color:#7bafd4;font-size:11px;padding-top:18px;text-align:center">Fetch station data first</div></div>
         </div>
       </div>
 
-      <div id="chart-area">
-        <div class="lbl" id="chart-title">TIME SERIES</div>
-        <div id="chart-wrap">
-          <div id="empty-state">
-            <div style="font-size:32px;margin-bottom:10px">📡</div>
-            <div style="margin-bottom:6px">No data loaded yet</div>
-            <div style="font-size:10px;text-align:center;max-width:280px">
-              Add a DWS station then click "↓ Fetch Data"</div>
+      <div id="chartbox">
+        <div class="lbl" id="ctitle">TIME SERIES</div>
+        <div id="canvaswrap">
+          <div id="empty">
+            <div style="font-size:30px">📡</div>
+            <div>No data loaded yet</div>
+            <div style="font-size:10px;text-align:center;max-width:260px">
+              Add a DWS station (WMA + station number) and click ↓ Fetch Data</div>
           </div>
-          <canvas id="myChart" style="display:none;width:100%;height:100%"></canvas>
+          <canvas id="myChart"></canvas>
         </div>
       </div>
 
-      <div id="params-bar" style="display:none">
-        <span style="font-size:10px;color:#7bafd4;white-space:nowrap;padding-top:4px">ALL PARAMS:</span>
-        <div id="params-bar-inner" style="display:flex;gap:5px;flex-wrap:wrap"></div>
+      <div id="pbar">
+        <span style="font-size:10px;color:#7bafd4;margin-right:6px">ALL PARAMS:</span>
+        <span id="pbinner"></span>
       </div>
     </div>
   </div>
 
-  <div id="footer">
-    <span>Data: DWS RQIS ·
-      <a href="https://www.dws.gov.za/iwqs/wms/data/" target="_blank">dws.gov.za/iwqs/wms/data</a></span>
-    <span>WRO Dashboard · TWQR = SA Water Quality Guidelines (Domestic Use)</span>
+  <div id="ftr">
+    <span>Data: DWS RQIS · <a href="https://www.dws.gov.za/iwqs/wms/data/" target="_blank">dws.gov.za/iwqs/wms/data</a></span>
+    <span>WRO · TWQR = SA Water Quality Guidelines (Domestic Use)</span>
   </div>
 </div>
 
+<!-- Scripts at END of body so layout renders first -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script>
-// ── Constants ─────────────────────────────────────────────────────────────────
-const C = { bg:"#0a1628",surface:"#0f2040",card:"#122448",border:"#1e3a6e",
-  accent:"#00d4aa",accent2:"#4fc3f7",warn:"#ffb347",danger:"#ff5c5c",
-  text:"#e8f4fd",muted:"#7bafd4",good:"#4ade80" };
+// ── Fallback: if Leaflet CDN fails, show placeholder ──────────────────────────
+window.addEventListener('error', function(e){
+  if(e.target && e.target.src && e.target.src.includes('leaflet')){
+    document.getElementById('mapel').innerHTML =
+      '<div style="color:#7bafd4;font-size:10px;padding:10px;text-align:center">'+
+      'Map unavailable (Leaflet CDN blocked).<br/>Station data still works.</div>';
+  }
+}, true);
+</script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  onerror="document.getElementById('mapel').innerHTML='&lt;div style=padding:12px;color:#7bafd4;text-align:center&gt;Map unavailable&lt;/div&gt;'"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"
+  onerror="document.getElementById('ctitle').textContent+=' (Chart.js unavailable)'"></script>
+<script>
+// ── Theme ─────────────────────────────────────────────────────────────────────
+const C={bg:"#0a1628",card:"#122448",border:"#1e3a6e",accent:"#00d4aa",
+  accent2:"#4fc3f7",warn:"#ffb347",danger:"#ff5c5c",text:"#e8f4fd",muted:"#7bafd4",good:"#4ade80"};
 
-const PARAMS = {
-  EC:        { label:"EC (mS/m)",          unit:"mS/m",  twqr:[0,70],   color:"#4fc3f7" },
-  PH:        { label:"pH",                  unit:"",      twqr:[6,9],    color:"#a78bfa" },
-  TURB:      { label:"Turbidity (NTU)",     unit:"NTU",   twqr:[0,1],    color:"#fb923c" },
-  CHLORIDE:  { label:"Chloride (mg/L)",     unit:"mg/L",  twqr:[0,100],  color:"#34d399" },
-  SODIUM:    { label:"Sodium (mg/L)",       unit:"mg/L",  twqr:[0,100],  color:"#f472b6" },
-  NITRATE:   { label:"Nitrate (mg/L)",      unit:"mg/L",  twqr:[0,6],    color:"#facc15" },
-  PHOSPHATE: { label:"Phosphate (mg/L)",    unit:"mg/L",  twqr:[0,1],    color:"#f87171" },
-  TDS:       { label:"TDS (mg/L)",          unit:"mg/L",  twqr:[0,450],  color:"#60a5fa" },
-  CALCIUM:   { label:"Calcium (mg/L)",      unit:"mg/L",  twqr:[0,80],   color:"#c084fc" },
-  SULPHATE:  { label:"Sulphate (mg/L)",     unit:"mg/L",  twqr:[0,200],  color:"#2dd4bf" },
-  COD:       { label:"COD (mg/L)",          unit:"mg/L",  twqr:[0,10],   color:"#fb7185" },
-  DO:        { label:"Dissolved O₂ (mg/L)", unit:"mg/L",  twqr:[6,100],  color:"#86efac" },
-  FLUORIDE:  { label:"Fluoride (mg/L)",     unit:"mg/L",  twqr:[0,1],    color:"#fbbf24" },
-  MAGNESIUM: { label:"Magnesium (mg/L)",    unit:"mg/L",  twqr:[0,70],   color:"#a3e635" },
-  POTASSIUM: { label:"Potassium (mg/L)",    unit:"mg/L",  twqr:[0,50],   color:"#e879f9" },
+// ── Parameter metadata + SA TWQR ──────────────────────────────────────────────
+const PARAMS={
+  EC:       {label:"EC (mS/m)",         unit:"mS/m", twqr:[0,70],  color:"#4fc3f7"},
+  PH:       {label:"pH",                unit:"",     twqr:[6,9],   color:"#a78bfa"},
+  TURB:     {label:"Turbidity (NTU)",   unit:"NTU",  twqr:[0,1],   color:"#fb923c"},
+  CHLORIDE: {label:"Chloride (mg/L)",   unit:"mg/L", twqr:[0,100], color:"#34d399"},
+  SODIUM:   {label:"Sodium (mg/L)",     unit:"mg/L", twqr:[0,100], color:"#f472b6"},
+  NITRATE:  {label:"Nitrate (mg/L)",    unit:"mg/L", twqr:[0,6],   color:"#facc15"},
+  PHOSPHATE:{label:"Phosphate (mg/L)",  unit:"mg/L", twqr:[0,1],   color:"#f87171"},
+  TDS:      {label:"TDS (mg/L)",        unit:"mg/L", twqr:[0,450], color:"#60a5fa"},
+  CALCIUM:  {label:"Calcium (mg/L)",    unit:"mg/L", twqr:[0,80],  color:"#c084fc"},
+  SULPHATE: {label:"Sulphate (mg/L)",   unit:"mg/L", twqr:[0,200], color:"#2dd4bf"},
+  COD:      {label:"COD (mg/L)",        unit:"mg/L", twqr:[0,10],  color:"#fb7185"},
+  DO:       {label:"Dissolved O₂ (mg/L)",unit:"mg/L",twqr:[6,100], color:"#86efac"},
+  FLUORIDE: {label:"Fluoride (mg/L)",   unit:"mg/L", twqr:[0,1],   color:"#fbbf24"},
+  MAGNESIUM:{label:"Magnesium (mg/L)",  unit:"mg/L", twqr:[0,70],  color:"#a3e635"},
+  POTASSIUM:{label:"Potassium (mg/L)",  unit:"mg/L", twqr:[0,50],  color:"#e879f9"},
 };
-
-function pmeta(col) {
-  const up = col.toUpperCase();
-  for (const [k,m] of Object.entries(PARAMS)) if (up.includes(k)) return {...m,key:k};
-  return { label:col, unit:"", twqr:null, color:"#7bafd4", key:col };
+function pm(col){
+  const up=col.toUpperCase();
+  for(const[k,m]of Object.entries(PARAMS))if(up.includes(k))return{...m,key:k};
+  return{label:col,unit:"",twqr:null,color:"#7bafd4",key:col};
 }
-function exceed(data, twqr) {
-  if (!twqr||!data.length) return null;
+function exc(data,twqr){
+  if(!twqr||!data.length)return null;
   return Math.round(data.filter(d=>d.v<twqr[0]||d.v>twqr[1]).length/data.length*100);
 }
 
-// ── State ─────────────────────────────────────────────────────────────────────
-let stations = [{ id:"90162", wma:"A21", name:"A21_90162",
-  lat:null, lon:null, loaded:false, error:null, data:null }];
-let activeIdx   = 0;
-let activeParam = null;
-let proxyUrl    = "";
-let chartInst   = null;
-let leafMap     = null;
-let markers     = [];
+// ── App state ─────────────────────────────────────────────────────────────────
+let stations=[{id:"90162",wma:"A21",name:"A21_90162",lat:null,lon:null,loaded:false,error:null,data:null}];
+let ai=0, ap=null, proxyUrl="", chart=null, lmap=null, lmarkers=[];
 
-// ── ZIP parser ────────────────────────────────────────────────────────────────
-function buildUrl(wma, stn, proxy) {
-  const d = `https://www.dws.gov.za/iwqs/wms/data/${wma}/${wma}_${stn}.zip`;
-  return proxy ? `${proxy.replace(/\/$/,"")}/proxy?url=${encodeURIComponent(d)}` : d;
-}
-
-async function fetchZipCsv(url) {
-  const resp = await fetch(url, {mode:"cors"});
-  if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
-  const buf = await resp.arrayBuffer();
-  const b   = new Uint8Array(buf);
-  const v   = new DataView(buf);
-  let eocd  = -1;
-  for (let i=b.length-22;i>=0;i--)
-    if (b[i]===0x50&&b[i+1]===0x4b&&b[i+2]===0x05&&b[i+3]===0x06){eocd=i;break;}
-  if (eocd<0) throw new Error("Not a valid ZIP");
-  const cdOff = v.getUint32(eocd+16,true);
-  const nf    = v.getUint16(eocd+8,true);
-  let pos=cdOff, csvFile=null;
-  for (let f=0;f<nf;f++) {
-    const fn=v.getUint16(pos+28,true),ex=v.getUint16(pos+30,true),cm=v.getUint16(pos+32,true);
-    const method=v.getUint16(pos+10,true),csz=v.getUint32(pos+20,true),lo=v.getUint32(pos+42,true);
-    const name=new TextDecoder().decode(b.slice(pos+46,pos+46+fn));
-    if (/\.(csv|txt)$/i.test(name)) csvFile={name,method,csz,lo};
-    pos+=46+fn+ex+cm;
+// ── Map init ──────────────────────────────────────────────────────────────────
+function initMap(){
+  try{
+    lmap=L.map("mapel",{zoomControl:true}).setView([-29,25],5);
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+      {attribution:"© CartoDB",maxZoom:19}).addTo(lmap);
+  }catch(e){
+    document.getElementById("mapel").innerHTML=
+      '<div style="color:#7bafd4;font-size:10px;padding:12px;text-align:center">Map loading…</div>';
   }
-  if (!csvFile) throw new Error("No CSV in ZIP");
-  const fn2=v.getUint16(csvFile.lo+26,true),ex2=v.getUint16(csvFile.lo+28,true);
-  const ds=csvFile.lo+30+fn2+ex2, comp=b.slice(ds,ds+csvFile.csz);
-  let text;
-  if (csvFile.method===0) { text=new TextDecoder("latin1").decode(comp); }
-  else if (csvFile.method===8) {
-    const stream=new DecompressionStream("deflate-raw");
-    const w=stream.writable.getWriter(); w.write(comp); w.close();
-    const chunks=[]; const r=stream.readable.getReader();
-    while(true){const{done,value}=await r.read();if(done)break;chunks.push(value);}
-    const out=new Uint8Array(chunks.reduce((s,c)=>s+c.length,0));
-    let off=0; for(const c of chunks){out.set(c,off);off+=c.length;}
-    text=new TextDecoder("latin1").decode(out);
-  } else throw new Error(`ZIP method ${csvFile.method} unsupported`);
-  return text;
 }
 
-function parseCsv(text) {
-  const lines=text.split(/\r?\n/).filter(l=>l.trim());
-  if (lines.length<2) return {headers:[],rows:[]};
-  const pr=l=>l.split(",").map(v=>v.replace(/^"|"$/g,"").trim());
-  const headers=pr(lines[0]);
-  const rows=[];
-  for(let i=1;i<lines.length;i++){
-    const vals=pr(lines[i]); if(vals.length<2) continue;
-    const row={}; headers.forEach((h,j)=>{row[h]=vals[j]??""}); rows.push(row);
-  }
-  return {headers,rows};
-}
-
-function buildSeries(rows,headers) {
-  const dc=headers.find(h=>/date/i.test(h));
-  const matched=headers.filter(h=>Object.keys(PARAMS).some(p=>h.toUpperCase().includes(p)));
-  const series={}; matched.forEach(h=>{series[h]=[];});
-  for(const row of rows){
-    const d=new Date(row[dc]||""); if(isNaN(d)) continue;
-    for(const h of matched){const vv=parseFloat(row[h]);if(!isNaN(vv))series[h].push({t:d,d:d.toISOString().slice(0,10),v:vv});}
-  }
-  return {series,matched};
-}
-
-// ── Map ───────────────────────────────────────────────────────────────────────
-function initMap() {
-  leafMap=L.map("map",{zoomControl:true}).setView([-29,25],5);
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-    {attribution:"© CartoDB",maxZoom:19}).addTo(leafMap);
-}
-
-function refreshMap() {
-  if(!leafMap) return;
-  markers.forEach(m=>m.remove()); markers=[];
+function refreshMap(){
+  if(!lmap)return;
+  lmarkers.forEach(m=>m.remove()); lmarkers=[];
   const pts=[];
   stations.forEach(s=>{
-    if(!s.lat||!s.lon) return;
+    if(!s.lat||!s.lon)return;
     const col=s.loaded?"#00d4aa":"#4fc3f7";
-    const icon=L.divIcon({html:`<div style="width:12px;height:12px;border-radius:50%;
-      background:${col};border:2px solid #fff;box-shadow:0 0 8px ${col}"></div>`,
+    const icon=L.divIcon({html:`<div style="width:11px;height:11px;border-radius:50%;
+      background:${col};border:2px solid #fff;box-shadow:0 0 6px ${col}"></div>`,
       className:"",iconAnchor:[6,6]});
-    const m=L.marker([s.lat,s.lon],{icon}).bindPopup(`<b>${s.name}</b><br/>${s.wma}_${s.id}`).addTo(leafMap);
-    markers.push(m); pts.push([s.lat,s.lon]);
+    lmarkers.push(L.marker([s.lat,s.lon],{icon})
+      .bindPopup(`<b>${s.name}</b><br/>${s.wma}_${s.id}`).addTo(lmap));
+    pts.push([s.lat,s.lon]);
   });
-  if(pts.length) leafMap.fitBounds(pts,{padding:[30,30]});
+  if(pts.length)lmap.fitBounds(pts,{padding:[20,20]});
+}
+
+// ── ZIP / CSV parser ──────────────────────────────────────────────────────────
+function burl(wma,stn,px){
+  const d=`https://www.dws.gov.za/iwqs/wms/data/${wma}/${wma}_${stn}.zip`;
+  return px?`${px.replace(/\/$/,"")}/proxy?url=${encodeURIComponent(d)}`:d;
+}
+
+async function fetchZip(url){
+  const r=await fetch(url,{mode:"cors"});
+  if(!r.ok)throw new Error(`HTTP ${r.status} ${r.statusText}`);
+  const buf=await r.arrayBuffer();
+  const b=new Uint8Array(buf),v=new DataView(buf);
+  let eocd=-1;
+  for(let i=b.length-22;i>=0;i--)
+    if(b[i]===0x50&&b[i+1]===0x4b&&b[i+2]===0x05&&b[i+3]===0x06){eocd=i;break;}
+  if(eocd<0)throw new Error("Not a valid ZIP file");
+  const cdo=v.getUint32(eocd+16,true),nf=v.getUint16(eocd+8,true);
+  let pos=cdo,cf=null;
+  for(let f=0;f<nf;f++){
+    const fn=v.getUint16(pos+28,true),ex=v.getUint16(pos+30,true),cm=v.getUint16(pos+32,true);
+    const meth=v.getUint16(pos+10,true),csz=v.getUint32(pos+20,true),lo=v.getUint32(pos+42,true);
+    const name=new TextDecoder().decode(b.slice(pos+46,pos+46+fn));
+    if(/\.(csv|txt)$/i.test(name))cf={name,meth,csz,lo};
+    pos+=46+fn+ex+cm;
+  }
+  if(!cf)throw new Error("No CSV found in ZIP");
+  const fn2=v.getUint16(cf.lo+26,true),ex2=v.getUint16(cf.lo+28,true);
+  const ds=cf.lo+30+fn2+ex2,comp=b.slice(ds,ds+cf.csz);
+  if(cf.meth===0)return new TextDecoder("latin1").decode(comp);
+  if(cf.meth===8){
+    const stream=new DecompressionStream("deflate-raw");
+    const w=stream.writable.getWriter();w.write(comp);w.close();
+    const chunks=[],rd=stream.readable.getReader();
+    while(true){const{done,value}=await rd.read();if(done)break;chunks.push(value);}
+    const out=new Uint8Array(chunks.reduce((s,c)=>s+c.length,0));
+    let off=0;for(const c of chunks){out.set(c,off);off+=c.length;}
+    return new TextDecoder("latin1").decode(out);
+  }
+  throw new Error(`ZIP method ${cf.meth} not supported`);
+}
+
+function parseCsv(text){
+  const lines=text.split(/\r?\n/).filter(l=>l.trim());
+  if(lines.length<2)return{headers:[],rows:[]};
+  const pr=l=>l.split(",").map(v=>v.replace(/^"|"$/g,"").trim());
+  const headers=pr(lines[0]),rows=[];
+  for(let i=1;i<lines.length;i++){
+    const vals=pr(lines[i]);if(vals.length<2)continue;
+    const row={};headers.forEach((h,j)=>{row[h]=vals[j]??""});rows.push(row);
+  }
+  return{headers,rows};
+}
+
+function mkSeries(rows,headers){
+  const dc=headers.find(h=>/date/i.test(h));
+  const matched=headers.filter(h=>Object.keys(PARAMS).some(p=>h.toUpperCase().includes(p)));
+  const series={};matched.forEach(h=>{series[h]=[];});
+  for(const row of rows){
+    const d=new Date(row[dc]||"");if(isNaN(d))continue;
+    for(const h of matched){const vv=parseFloat(row[h]);if(!isNaN(vv))series[h].push({t:d,d:d.toISOString().slice(0,10),v:vv});}
+  }
+  return{series,matched};
 }
 
 // ── Chart ─────────────────────────────────────────────────────────────────────
-function renderChart(data, meta) {
+function renderChart(data,meta){
   const canvas=document.getElementById("myChart");
-  const empty=document.getElementById("empty-state");
-  if(!data||!data.length){
-    canvas.style.display="none"; empty.style.display="flex";
-    if(chartInst){chartInst.destroy();chartInst=null;} return;
+  const empty=document.getElementById("empty");
+  if(!data||!data.length||typeof Chart==="undefined"){
+    canvas.style.display="none";empty.style.display="flex";
+    if(chart){chart.destroy();chart=null;}return;
   }
-  empty.style.display="none"; canvas.style.display="block";
+  empty.style.display="none";canvas.style.display="block";
+  canvas.style.width="100%";canvas.style.height="100%";
   const sorted=[...data].sort((a,b)=>a.t-b.t);
   const col=meta?.color||"#4fc3f7";
-
-  // Build TWQR annotation lines manually as extra datasets
   const datasets=[{
-    label:meta?.key||"value", data:sorted.map(d=>({x:d.d,y:d.v})),
-    borderColor:col, backgroundColor:col+"22", borderWidth:1.5,
-    pointRadius:sorted.length>200?0:2, pointHoverRadius:5, tension:0.1, fill:false
+    label:meta?.key||ap,
+    data:sorted.map(d=>({x:d.d,y:d.v})),
+    borderColor:col,backgroundColor:col+"22",borderWidth:1.5,
+    pointRadius:sorted.length>200?0:2,pointHoverRadius:5,tension:0.1,fill:false
   }];
   if(meta?.twqr){
-    const maxY=meta.twqr[1];
-    datasets.push({label:`Max TWQR (${maxY} ${meta.unit||""})`,
-      data:sorted.map(d=>({x:d.d,y:maxY})),
-      borderColor:"#ffb34788",borderWidth:1,borderDash:[6,4],
-      pointRadius:0,fill:false,tension:0});
-    if(meta.twqr[0]>0) datasets.push({label:`Min TWQR (${meta.twqr[0]} ${meta.unit||""})`,
+    datasets.push({label:`Max TWQR (${meta.twqr[1]} ${meta.unit||""})`,
+      data:sorted.map(d=>({x:d.d,y:meta.twqr[1]})),
+      borderColor:"#ffb34799",borderWidth:1,
+      borderDash:[6,4],pointRadius:0,fill:false});
+    if(meta.twqr[0]>0)datasets.push({label:`Min TWQR (${meta.twqr[0]} ${meta.unit||""})`,
       data:sorted.map(d=>({x:d.d,y:meta.twqr[0]})),
-      borderColor:"#ffb34788",borderWidth:1,borderDash:[6,4],
-      pointRadius:0,fill:false,tension:0});
+      borderColor:"#ffb34799",borderWidth:1,
+      borderDash:[6,4],pointRadius:0,fill:false});
   }
-
-  if(chartInst){chartInst.destroy();chartInst=null;}
-  chartInst=new Chart(canvas,{
-    type:"line",
-    data:{datasets},
-    options:{
-      responsive:true, maintainAspectRatio:false, animation:false,
+  if(chart){chart.destroy();chart=null;}
+  chart=new Chart(canvas,{
+    type:"line",data:{datasets},
+    options:{responsive:true,maintainAspectRatio:false,animation:false,
       parsing:{xAxisKey:"x",yAxisKey:"y"},
-      plugins:{
-        legend:{labels:{color:C.muted,font:{size:10}}},
+      plugins:{legend:{labels:{color:C.muted,font:{size:10},boxWidth:12}},
         tooltip:{backgroundColor:C.card,titleColor:C.muted,bodyColor:col,
-          callbacks:{label:ctx=>`${ctx.parsed.y} ${meta?.unit||""}`}}
-      },
+          callbacks:{label:ctx=>`${ctx.parsed.y} ${meta?.unit||""}`}}},
       scales:{
-        x:{type:"category",ticks:{color:C.muted,font:{size:9},maxTicksLimit:12},
-          grid:{color:C.border+"55"}},
-        y:{ticks:{color:C.muted,font:{size:9}},grid:{color:C.border+"55"}}
-      }
-    }
+        x:{type:"category",ticks:{color:C.muted,font:{size:9},maxTicksLimit:10},grid:{color:C.border+"44"}},
+        y:{ticks:{color:C.muted,font:{size:9}},grid:{color:C.border+"44"}}}}
   });
 }
 
-// ── Render helpers ────────────────────────────────────────────────────────────
-function renderStats() {
-  const stn=stations[activeIdx];
-  const el=document.getElementById("stats-cards");
-  document.getElementById("stats-title").textContent=
-    "STATISTICS"+(activeParam?" · "+pmeta(activeParam).key:"");
-  if(!stn?.data||!activeParam){
-    el.innerHTML=`<div style="color:${C.muted};font-size:11px;padding-top:20px;text-align:center">
-      ${stn?.loaded?"Select a parameter →":"Fetch station data first"}</div>`; return;
+// ── Render UI ─────────────────────────────────────────────────────────────────
+function renderStats(){
+  const s=stations[ai];
+  document.getElementById("stitle").textContent="STATISTICS"+(ap?" · "+pm(ap).key:"");
+  const el=document.getElementById("scards");
+  if(!s?.data||!ap){
+    el.innerHTML=`<div style="color:${C.muted};font-size:11px;padding-top:16px;text-align:center">
+      ${s?.loaded?"Select a parameter →":"Fetch station data first"}</div>`;return;
   }
-  const data=stn.data.series[activeParam]||[];
-  if(!data.length){el.innerHTML=`<div style="color:${C.muted};font-size:11px">No data for this parameter</div>`;return;}
+  const data=s.data.series[ap]||[];
+  if(!data.length){el.innerHTML=`<div style="color:${C.muted};font-size:11px">No data</div>`;return;}
   const vals=data.map(d=>d.v);
   const mean=(vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(2);
-  const min=Math.min(...vals).toFixed(2), max=Math.max(...vals).toFixed(2);
-  const meta=pmeta(activeParam), exc=exceed(data,meta.twqr);
-  const ec=exc>20?C.danger:C.good;
-  el.innerHTML=`
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:5px">
-      ${[["SAMPLES",data.length],["MEAN",`${mean} ${meta.unit||""}`],
-         ["MIN",`${min} ${meta.unit||""}`],["MAX",`${max} ${meta.unit||""}`]]
-        .map(([l,v])=>`<div class="stat-card"><div class="stat-lbl">${l}</div>
-          <div class="stat-val">${v}</div></div>`).join("")}
-    </div>
-    ${exc!==null?`<div class="stat-card" style="border-color:${ec};background:${ec}22">
-      <div class="stat-lbl">TWQR EXCEEDANCE</div>
-      <div style="font-size:22px;font-weight:700;color:${ec}">${exc}%</div>
+  const mn=Math.min(...vals).toFixed(2),mx=Math.max(...vals).toFixed(2);
+  const meta=pm(ap),ex=exc(data,meta.twqr),ec=ex>20?C.danger:C.good;
+  el.innerHTML=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:4px">
+    ${[["SAMPLES",data.length],["MEAN",`${mean} ${meta.unit||""}`],
+       ["MIN",`${mn} ${meta.unit||""}`],["MAX",`${mx} ${meta.unit||""}`]]
+      .map(([l,v])=>`<div class="stc"><div class="stcl">${l}</div><div class="stcv">${v}</div></div>`).join("")}
+    </div>${ex!==null?`<div class="stc" style="border-color:${ec};background:${ec}22">
+      <div class="stcl">TWQR EXCEEDANCE</div>
+      <div style="font-size:20px;font-weight:700;color:${ec}">${ex}%</div>
       <div style="font-size:9px;color:${C.muted}">Target: ${meta.twqr[0]}–${meta.twqr[1]} ${meta.unit||""}</div>
     </div>`:""}`;
 }
 
-function renderParams() {
-  const stn=stations[activeIdx];
-  const picker=document.getElementById("param-picker");
-  const bar=document.getElementById("params-bar");
-  if(!stn?.data){picker.style.display="none";bar.style.display="none";return;}
-  picker.style.display="block"; bar.style.display="flex";
-
-  const btnWrap=document.getElementById("param-buttons");
-  btnWrap.innerHTML="";
-  stn.data.matched.forEach(p=>{
-    const pm=pmeta(p), exc=exceed(stn.data.series[p],pm.twqr);
-    const btn=document.createElement("button");
-    btn.className="param-btn";
-    btn.textContent=pm.key+(exc>0?` ${exc}%⚠`:"");
-    btn.style.cssText=`color:${activeParam===p?"#000":pm.color};
-      background:${activeParam===p?pm.color:pm.color+"22"};border-color:${pm.color}88`;
-    btn.onclick=()=>{activeParam=p;fullRefresh();};
-    btnWrap.appendChild(btn);
+function renderParams(){
+  const s=stations[ai];
+  const pp=document.getElementById("ppick"),pb=document.getElementById("pbar");
+  if(!s?.data){pp.style.display="none";pb.style.display="none";return;}
+  pp.style.display="block";pb.style.display="block";
+  const bn=document.getElementById("pbtns");bn.innerHTML="";
+  s.data.matched.forEach(p=>{
+    const meta=pm(p),ex=exc(s.data.series[p],meta.twqr);
+    const b=document.createElement("span");b.className="pb";
+    b.textContent=meta.key+(ex>0?` ${ex}%⚠`:"");
+    b.style.cssText=`color:${ap===p?"#000":meta.color};background:${ap===p?meta.color:meta.color+"22"};border-color:${meta.color}88;cursor:pointer`;
+    b.onclick=()=>{ap=p;refresh();};
+    bn.appendChild(b);
   });
-
-  const bi=document.getElementById("params-bar-inner");
-  bi.innerHTML="";
-  stn.data.matched.forEach(p=>{
-    const pm=pmeta(p),d=stn.data.series[p];
-    const exc=exceed(d,pm.twqr), last=d.length?d[d.length-1].v.toFixed(1):"";
-    const card=document.createElement("div");
-    card.style.cssText=`flex-shrink:0;cursor:pointer;border-radius:6px;padding:3px 9px;
-      background:${activeParam===p?pm.color+"33":"#122448"};
-      border:1px solid ${activeParam===p?pm.color:"#1e3a6e"};
-      display:flex;flex-direction:column;align-items:center`;
-    card.innerHTML=`<div style="font-size:9px;color:${pm.color};font-weight:700">${pm.key}</div>
-      ${last?`<div style="font-size:12px;font-weight:700">${last}</div>`:""}
-      ${exc!==null?`<div style="font-size:9px;color:${exc>20?C.danger:C.good}">${exc}%</div>`:""}`;
-    card.onclick=()=>{activeParam=p;fullRefresh();};
-    bi.appendChild(card);
+  const bi=document.getElementById("pbinner");bi.innerHTML="";
+  s.data.matched.forEach(p=>{
+    const meta=pm(p),d=s.data.series[p];
+    const ex=exc(d,meta.twqr),last=d.length?d[d.length-1].v.toFixed(1):"";
+    const c=document.createElement("span");
+    c.style.cssText=`display:inline-block;cursor:pointer;border-radius:4px;padding:2px 8px;margin-right:4px;
+      background:${ap===p?meta.color+"33":C.card};border:1px solid ${ap===p?meta.color:C.border}`;
+    c.innerHTML=`<span style="font-size:9px;color:${meta.color};font-weight:700">${meta.key}</span>
+      ${last?` <span style="font-size:11px;font-weight:700">${last}</span>`:""}
+      ${ex!==null?` <span style="font-size:9px;color:${ex>20?C.danger:C.good}">${ex}%</span>`:""}`;
+    c.onclick=()=>{ap=p;refresh();};
+    bi.appendChild(c);
   });
 }
 
-function renderStationList() {
-  const list=document.getElementById("station-list");
-  list.innerHTML=`<div class="lbl" style="padding:7px 11px 3px">MONITORING STATIONS</div>`;
-  document.getElementById("loaded-count").textContent=
+function renderList(){
+  const el=document.getElementById("stnlist");
+  el.innerHTML=`<div class="lbl" style="padding:6px 10px 3px">MONITORING STATIONS</div>`;
+  document.getElementById("lcnt").textContent=
     `${stations.filter(s=>s.loaded).length}/${stations.length} loaded`;
-  stations.forEach((stn,idx)=>{
-    const card=document.createElement("div");
-    card.className="stn-card"+(idx===activeIdx?" active":"");
-    card.innerHTML=`
-      <div style="display:flex;justify-content:space-between;align-items:flex-start">
-        <div style="flex:1;min-width:0">
-          <div style="font-weight:700;color:${idx===activeIdx?C.accent:C.text};margin-bottom:2px">${stn.name}</div>
-          <div style="font-size:10px;color:${C.muted}">${stn.wma}_${stn.id}</div>
-          ${stn.data?`<div style="font-size:10px;color:${C.good};margin-top:2px">
-            ✓ ${stn.data.rowCount} samples · ${stn.data.matched.length} params</div>`:""}
-          ${stn.error?`<div style="font-size:10px;color:${C.danger};margin-top:2px;word-break:break-word">
-            ✗ ${stn.error}</div>`:""}
-        </div>
-        <button class="btn" style="font-size:14px;padding:0 5px;border:none;color:${C.muted};flex-shrink:0"
-          data-remove="${idx}">×</button>
+  stations.forEach((s,i)=>{
+    const d=document.createElement("div");
+    d.className="sc"+(i===ai?" on":"");
+    d.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;color:${i===ai?C.accent:C.text};margin-bottom:1px">${s.name}</div>
+        <div style="font-size:10px;color:${C.muted}">${s.wma}_${s.id}</div>
+        ${s.data?`<div style="font-size:10px;color:${C.good};margin-top:1px">✓ ${s.data.rowCount} samples · ${s.data.matched.length} params</div>`:""}
+        ${s.error?`<div style="font-size:10px;color:${C.danger};margin-top:1px;word-break:break-word">✗ ${s.error}</div>`:""}
       </div>
-      ${!stn.loaded&&!stn.error?`<button class="btn accent"
-        style="width:100%;margin-top:5px;font-size:10px" data-load="${idx}">↓ Fetch Data</button>`:""}
-      ${stn.loaded?`<button class="btn"
-        style="width:100%;margin-top:3px;font-size:9px" data-reload="${idx}">↺ Reload</button>`:""}`;
-    card.onclick=(e)=>{
-      const ri=e.target.dataset.remove, li=e.target.dataset.load, rli=e.target.dataset.reload;
-      if(ri!==undefined){removeStation(parseInt(ri));return;}
-      if(li!==undefined){loadStation(parseInt(li));return;}
-      if(rli!==undefined){reloadStation(parseInt(rli));return;}
-      activeIdx=idx; fullRefresh();
+      <button class="btn" style="border:none;color:${C.muted};font-size:14px;padding:0 4px"
+        data-rm="${i}">×</button></div>
+    ${!s.loaded&&!s.error?`<button class="btn abtn" style="width:100%;margin-top:5px;font-size:10px"
+      data-ld="${i}">↓ Fetch Data</button>`:""}
+    ${s.loaded?`<button class="btn" style="width:100%;margin-top:3px;font-size:9px"
+      data-rl="${i}">↺ Reload</button>`:""}`;
+    d.onclick=e=>{
+      const rm=e.target.dataset.rm,ld=e.target.dataset.ld,rl=e.target.dataset.rl;
+      if(rm!==undefined){rmStn(+rm);return;}
+      if(ld!==undefined){loadStn(+ld);return;}
+      if(rl!==undefined){rlStn(+rl);return;}
+      ai=i;refresh();
     };
-    list.appendChild(card);
+    el.appendChild(d);
   });
 }
 
-function fullRefresh() {
-  renderStationList();
-  renderParams();
-  renderStats();
-  refreshMap();
-  const stn=stations[activeIdx];
-  const data=(stn?.data?.series?.[activeParam])||[];
-  const meta=activeParam?pmeta(activeParam):null;
-  document.getElementById("chart-title").textContent=
-    "TIME SERIES"+(meta?` · ${meta.label}`:"")+(stn?` · ${stn.name}`:"");
+function refresh(){
+  renderList();renderParams();renderStats();refreshMap();
+  const s=stations[ai],data=(s?.data?.series?.[ap])||[],meta=ap?pm(ap):null;
+  document.getElementById("ctitle").textContent=
+    "TIME SERIES"+(meta?` · ${meta.label}`:"")+(s?` · ${s.name}`:"");
   renderChart(data,meta);
 }
 
-// ── Load data ─────────────────────────────────────────────────────────────────
-async function loadStation(idx) {
-  const stn=stations[idx];
-  stations[idx]={...stn,error:null}; renderStationList();
-  try {
-    const url=buildUrl(stn.wma,stn.id,proxyUrl);
-    const text=await fetchZipCsv(url);
-    const {headers,rows}=parseCsv(text);
-    const {series,matched}=buildSeries(rows,headers);
-    let lat=stn.lat,lon=stn.lon;
+// ── Data loading ──────────────────────────────────────────────────────────────
+async function loadStn(i){
+  const s=stations[i];stations[i]={...s,error:null};renderList();
+  try{
+    const txt=await fetchZip(burl(s.wma,s.id,proxyUrl));
+    const{headers,rows}=parseCsv(txt);
+    const{series,matched}=mkSeries(rows,headers);
+    let lat=s.lat,lon=s.lon;
     const lc=headers.find(h=>/^lat/i.test(h)),nc=headers.find(h=>/^lo?n/i.test(h));
-    if(lc&&rows[0]) lat=parseFloat(rows[0][lc])||lat;
-    if(nc&&rows[0]) lon=parseFloat(rows[0][nc])||lon;
-    stations[idx]={...stn,loaded:true,error:null,lat,lon,
+    if(lc&&rows[0])lat=parseFloat(rows[0][lc])||lat;
+    if(nc&&rows[0])lon=parseFloat(rows[0][nc])||lon;
+    stations[i]={...s,loaded:true,error:null,lat,lon,
       data:{headers,rows,series,matched,rowCount:rows.length}};
-    if(!activeParam&&matched.length) activeParam=matched[0];
-  } catch(e) { stations[idx]={...stn,error:e.message}; }
-  fullRefresh();
+    if(!ap&&matched.length)ap=matched[0];
+  }catch(e){stations[i]={...s,error:e.message};}
+  refresh();
 }
+function rmStn(i){stations.splice(i,1);if(ai>=i)ai=Math.max(0,ai-1);if(!stations.length)ai=-1;refresh();}
+function rlStn(i){stations[i]={...stations[i],loaded:false,error:null,data:null};refresh();loadStn(i);}
 
-function reloadStation(idx) {
-  stations[idx]={...stations[idx],loaded:false,error:null,data:null};
-  fullRefresh(); loadStation(idx);
-}
-
-function removeStation(idx) {
-  stations.splice(idx,1);
-  if(activeIdx>=idx) activeIdx=Math.max(0,activeIdx-1);
-  if(!stations.length) activeIdx=-1;
-  fullRefresh();
-}
-
-// ── Event listeners ───────────────────────────────────────────────────────────
-document.getElementById("add-btn").onclick=()=>{
-  const wma=document.getElementById("f-wma").value.trim().toUpperCase();
-  const stn=document.getElementById("f-stn").value.trim();
-  if(!wma||!stn) return;
-  const name=document.getElementById("f-name").value.trim()||`${wma}_${stn}`;
-  const lat=parseFloat(document.getElementById("f-lat").value)||null;
-  const lon=parseFloat(document.getElementById("f-lon").value)||null;
+// ── Form handlers ─────────────────────────────────────────────────────────────
+function addStation(){
+  const wma=document.getElementById("fw").value.trim().toUpperCase();
+  const stn=document.getElementById("fs").value.trim();
+  if(!wma||!stn)return;
+  const name=document.getElementById("fn").value.trim()||`${wma}_${stn}`;
+  const lat=parseFloat(document.getElementById("flat").value)||null;
+  const lon=parseFloat(document.getElementById("flon").value)||null;
   stations.push({id:stn,wma,name,lat,lon,loaded:false,error:null,data:null});
-  if(activeIdx<0) activeIdx=0;
-  ["f-stn","f-name","f-lat","f-lon"].forEach(id=>{document.getElementById(id).value="";});
-  fullRefresh();
-};
+  if(ai<0)ai=0;
+  ["fs","fn","flat","flon"].forEach(id=>document.getElementById(id).value="");
+  refresh();
+}
 
-document.getElementById("settings-btn").onclick=()=>{
-  document.getElementById("settings-panel").classList.toggle("open");
-};
+function toggleSettings(){document.getElementById("setpan").classList.toggle("open");}
 
-document.getElementById("proxy-test-btn").onclick=async()=>{
-  proxyUrl=document.getElementById("proxy-input").value.trim();
-  const b=document.getElementById("proxy-badge");
-  b.style.display="inline-block";b.textContent="● PROXY …";
-  b.style.color=C.warn;b.style.borderColor=C.warn;
-  try {
+async function testProxy(){
+  proxyUrl=document.getElementById("pxi").value.trim();
+  const b=document.getElementById("pbadge");
+  b.style.display="inline-block";b.textContent="● …";b.style.color=C.warn;b.style.borderColor=C.warn;
+  try{
     const r=await fetch(`${proxyUrl.replace(/\/$/,"")}/health`,{signal:AbortSignal.timeout(5000)});
     const j=await r.json();
     if(j.status==="ok"){b.textContent="● PROXY OK";b.style.color=C.good;b.style.borderColor=C.good;}
-    else throw new Error();
-  } catch{b.textContent="● PROXY FAIL";b.style.color=C.danger;b.style.borderColor=C.danger;}
-};
+    else throw 0;
+  }catch{b.textContent="● PROXY FAIL";b.style.color=C.danger;b.style.borderColor=C.danger;}
+}
 
-document.getElementById("proxy-clear-btn").onclick=()=>{
-  proxyUrl=""; document.getElementById("proxy-input").value="";
-  const b=document.getElementById("proxy-badge"); b.style.display="none";
-};
+function clearProxy(){
+  proxyUrl="";document.getElementById("pxi").value="";
+  const b=document.getElementById("pbadge");b.style.display="none";
+}
 
-document.getElementById("proxy-input").onchange=()=>{
-  proxyUrl=document.getElementById("proxy-input").value.trim();
-};
-
-// ── Boot ──────────────────────────────────────────────────────────────────────
-initMap();
-fullRefresh();
+// ── Boot — wait for DOM + CDN scripts ────────────────────────────────────────
+window.addEventListener("load",()=>{initMap();refresh();});
 </script>
 </body>
 </html>
