@@ -500,19 +500,44 @@ async function loadSampleCounts(){
 
 function parseSampleCountsHtml(html){
   const counts = {};
-  // Match data links and extract WMA, ID, n, first date, last date, med EC
-  // Pattern from table: /data/C12/C12_178999.zip ... | n | first | last | medEC |
-  const re = /\/data\/([A-Z][0-9]{1,2})\/[A-Z][0-9]{1,2}_([0-9]+)\.zip[^|]*\|[^|]*\|[^|]*\|([^|]+)\|[^|]+\|\s*(\d+)\s*\|\s*([\d-]+)\s*\|\s*([\d-]+)\s*\|\s*([\d.]+|n\/a)\s*\|/gi;
-  let m;
-  while((m=re.exec(html))!==null){
-    const wma=m[1].toUpperCase(), id=m[2];
-    const key=`${wma}_${id}`;
-    counts[key]={
-      n:    parseInt(m[4])||0,
-      first: m[5]?.trim()||"",
-      last:  m[6]?.trim()||"",
-      medEC: m[7]?.trim()||""
-    };
+  // Each row pattern across multiple lines:
+  // <a href=".../WMA/WMA_ID.zip">data</a></td>
+  // <td>Description</td><td>Type</td>
+  // <td align="right">N</td>
+  // <td>FIRST_DATE</td>
+  // <td>LAST_DATE</td>
+  // <td align="right">MED_EC</td>
+
+  // Split into rows by <tr>
+  const rows = html.split(/<tr[^>]*>/i);
+  for(const row of rows){
+    // Find the zip URL to get WMA and ID
+    const zipMatch = row.match(/\/data\/([A-Z][0-9]{1,2})\/[A-Z][0-9]{1,2}_([0-9]+)\.zip/i);
+    if(!zipMatch) continue;
+    const wma = zipMatch[1].toUpperCase();
+    const id  = zipMatch[2];
+
+    // Extract all <td> cell contents in order
+    const cells = [];
+    const tdRe = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+    let tm;
+    while((tm=tdRe.exec(row))!==null){
+      // Strip HTML tags and trim
+      cells.push(tm[1].replace(/<[^>]+>/g,"").replace(/\s+/g," ").trim());
+    }
+
+    // Cells order: [bold station] [plot] [data] [description] [type] [n] [first] [last] [medEC] [flow] [lat] [lon]
+    // Find n (sample count) — it's the first purely numeric cell after the data link
+    // Safer: find by position — cell index 5 should be n
+    if(cells.length < 8) continue;
+    const n     = parseInt(cells[5]) || 0;
+    const first = cells[6]?.trim() || "";
+    const last  = cells[7]?.trim() || "";
+    const medEC = cells[8]?.trim() || "";
+
+    if(n > 0){
+      counts[`${wma}_${id}`] = { n, first, last, medEC };
+    }
   }
   return counts;
 }
