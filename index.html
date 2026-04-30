@@ -607,28 +607,47 @@ async function fetchZip(url, existingBuf){
     if(b[i]===0x50&&b[i+1]===0x4b&&b[i+2]===0x05&&b[i+3]===0x06){eocd=i;break;}
   if(eocd<0)throw new Error("Not a valid ZIP file");
   const cdo=v.getUint32(eocd+16,true),nf=v.getUint16(eocd+8,true);
-  let pos=cdo,cf=null;
+  let pos=cdo;
+  const files=[];
   for(let f=0;f<nf;f++){
     const fn=v.getUint16(pos+28,true),ex=v.getUint16(pos+30,true),cm=v.getUint16(pos+32,true);
     const meth=v.getUint16(pos+10,true),csz=v.getUint32(pos+20,true),lo=v.getUint32(pos+42,true);
     const name=new TextDecoder().decode(b.slice(pos+46,pos+46+fn));
-    if(/\.(csv|txt)$/i.test(name))cf={name,meth,csz,lo};
+    if(/\.(csv|txt)$/i.test(name) && csz>0) files.push({name,meth,csz,lo});
     pos+=46+fn+ex+cm;
   }
-  if(!cf)throw new Error("No CSV found in ZIP");
-  const fn2=v.getUint16(cf.lo+26,true),ex2=v.getUint16(cf.lo+28,true);
-  const ds=cf.lo+30+fn2+ex2,comp=b.slice(ds,ds+cf.csz);
-  if(cf.meth===0)return new TextDecoder("latin1").decode(comp);
-  if(cf.meth===8){
-    const stream=new DecompressionStream("deflate-raw");
-    const w=stream.writable.getWriter();w.write(comp);w.close();
-    const chunks=[],rd=stream.readable.getReader();
-    while(true){const{done,value}=await rd.read();if(done)break;chunks.push(value);}
-    const out=new Uint8Array(chunks.reduce((s,c)=>s+c.length,0));
-    let off=0;for(const c of chunks){out.set(c,off);off+=c.length;}
-    return new TextDecoder("latin1").decode(out);
+  if(!files.length) throw new Error("No CSV found in ZIP");
+
+  // Try each CSV file — skip citation/readme files, use the one with real data
+  for(const cf of files){
+    const fn2=v.getUint16(cf.lo+26,true),ex2=v.getUint16(cf.lo+28,true);
+    const ds=cf.lo+30+fn2+ex2,comp=b.slice(ds,ds+cf.csz);
+    let text;
+    if(cf.meth===0){ text=new TextDecoder("latin1").decode(comp); }
+    else if(cf.meth===8){
+      const stream=new DecompressionStream("deflate-raw");
+      const w=stream.writable.getWriter();w.write(comp);w.close();
+      const chunks=[],rd=stream.readable.getReader();
+      while(true){const{done,value}=await rd.read();if(done)break;chunks.push(value);}
+      const out=new Uint8Array(chunks.reduce((s,c)=>s+c.length,0));
+      let off=0;for(const c of chunks){out.set(c,off);off+=c.length;}
+      text=new TextDecoder("latin1").decode(out);
+    } else continue;
+
+    // Skip citation/readme files — real data has a date column and numeric values
+    const firstLine = text.split(/\r?\n/)[0].toLowerCase();
+    if(firstLine.includes("citation") || firstLine.includes("suggested") || firstLine.includes("information extracted")){
+      console.log("Skipping citation file:", cf.name);
+      continue;
+    }
+    // Real data file should have STNNO or a date-like column in headers
+    if(firstLine.includes("stnno") || firstLine.includes("date") || firstLine.includes("startdate")){
+      return text;
+    }
+    // If we're not sure, return it anyway as a last resort
+    return text;
   }
-  throw new Error(`ZIP method ${cf.meth} not supported`);
+  throw new Error("No valid data CSV found in ZIP (only citation files)");
 }
 
 function parseCsv(text){
