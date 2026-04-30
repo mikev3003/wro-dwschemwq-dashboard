@@ -186,6 +186,9 @@
             <span id="fs-stn-count" style="font-size:10px;color:#7bafd4"></span>
             <button class="btn abtn" id="kmz-btn-fs" onclick="loadKmz(true)"
               style="font-size:10px;padding:3px 8px">🗺 Browse All Stations</button>
+            <button class="btn" id="counts-btn-fs" onclick="loadSampleCounts()"
+              style="font-size:10px;padding:3px 8px;display:none"
+              title="Load sample counts for all stations">📊 Load Sample Counts</button>
             <button class="btn" onclick="closeFullscreen()"
               style="font-size:10px;padding:3px 8px">✕ Close</button>
           </div>
@@ -221,6 +224,9 @@
             <span id="kmz-status" style="font-size:10px;color:#7bafd4;white-space:nowrap"></span>
             <button class="btn abtn" id="kmz-btn" onclick="loadKmz(false)"
               style="font-size:10px;padding:3px 8px;white-space:nowrap">🗺 Browse All Stations</button>
+            <button class="btn" id="counts-btn" onclick="loadSampleCounts()"
+              style="font-size:10px;padding:3px 8px;white-space:nowrap;display:none"
+              title="Load sample counts and date ranges for all stations">📊 Load Sample Counts</button>
             <button class="btn" onclick="openFullscreen()"
               style="font-size:10px;padding:3px 8px" title="Fullscreen map">⛶</button>
           </div>
@@ -427,11 +433,83 @@ async function loadKmz(fullscreen=false){
   ["kmz-status","kmz-status-fs"].forEach(id=>{const el=document.getElementById(id);if(el){el.textContent=countText;el.style.color="#4ade80";}});
   document.getElementById("fs-stn-count").textContent = countText;
 
+  // Show Load Sample Counts button now that stations are loaded
+  ["counts-btn","counts-btn-fs"].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display="inline-block";});
+
   // If fullscreen is open, build its own layer from cache
   if(fsMap && document.getElementById("map-overlay").classList.contains("open")){
     if(fsBrowseLayer){ fsBrowseLayer.remove(); fsBrowseLayer=null; }
     fsBrowseLayer = buildLayerForMap(allPins, fsMap);
   }
+}
+
+// ── Sample counts loader ───────────────────────────────────────────────────────
+let sampleCountsCache = {}; // keyed by "WMA_ID" e.g. "C13_90585"
+let countsLoaded = false;
+
+async function loadSampleCounts(){
+  if(countsLoaded){ alert("Sample counts already loaded!"); return; }
+  const btn  = document.getElementById("counts-btn");
+  const btnFs= document.getElementById("counts-btn-fs");
+  [btn,btnFs].forEach(b=>{ if(b){ b.textContent="⏳ Loading counts…"; b.disabled=true; }});
+
+  let total = 0, wmasLoaded = 0;
+
+  for(const wma of WMA_KMZS){
+    const htmUrl  = `https://www.dws.gov.za/iwqs/wms/data/${wma.code}_reg_WMS_nobor.htm`;
+    const proxied = `${proxyUrl.replace(/\/$/,"")}/proxy?url=${encodeURIComponent(htmUrl)}`;
+    ["kmz-status","kmz-status-fs"].forEach(id=>{
+      const el=document.getElementById(id);
+      if(el) el.textContent=`Loading counts: ${wma.name}… (${wmasLoaded}/${WMA_KMZS.length})`;
+    });
+    try {
+      const r = await fetch(proxied, {mode:"cors"});
+      if(!r.ok) continue;
+      const html = await r.text();
+      const parsed = parseSampleCountsHtml(html);
+      Object.assign(sampleCountsCache, parsed);
+      total += Object.keys(parsed).length;
+      wmasLoaded++;
+    } catch(e) {
+      console.warn(`Counts failed ${wma.code}:`, e.message);
+    }
+  }
+
+  countsLoaded = true;
+  const msg = `${total} station counts loaded`;
+  ["kmz-status","kmz-status-fs"].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el){ el.textContent=msg; el.style.color="#4ade80"; }
+  });
+  [btn,btnFs].forEach(b=>{ if(b){ b.textContent="📊 Counts Loaded ✓"; b.disabled=true; }});
+
+  // Rebuild browse layers to show counts in popups
+  if(allPinsCache.length){
+    buildBrowseLayer(allPinsCache);
+    if(fsMap && document.getElementById("map-overlay").classList.contains("open")){
+      if(fsBrowseLayer){ fsBrowseLayer.remove(); fsBrowseLayer=null; }
+      fsBrowseLayer = buildLayerForMap(allPinsCache, fsMap);
+    }
+  }
+}
+
+function parseSampleCountsHtml(html){
+  const counts = {};
+  // Match data links and extract WMA, ID, n, first date, last date, med EC
+  // Pattern from table: /data/C12/C12_178999.zip ... | n | first | last | medEC |
+  const re = /\/data\/([A-Z][0-9]{1,2})\/[A-Z][0-9]{1,2}_([0-9]+)\.zip[^|]*\|[^|]*\|[^|]*\|([^|]+)\|[^|]+\|\s*(\d+)\s*\|\s*([\d-]+)\s*\|\s*([\d-]+)\s*\|\s*([\d.]+|n\/a)\s*\|/gi;
+  let m;
+  while((m=re.exec(html))!==null){
+    const wma=m[1].toUpperCase(), id=m[2];
+    const key=`${wma}_${id}`;
+    counts[key]={
+      n:    parseInt(m[4])||0,
+      first: m[5]?.trim()||"",
+      last:  m[6]?.trim()||"",
+      medEC: m[7]?.trim()||""
+    };
+  }
+  return counts;
 }
 
 function showKmzHelp(){
@@ -684,12 +762,21 @@ function makeClusterIcon(count){
 
 function pinPopupHtml(p){
   const alreadyAdded = stations.some(s=>s.wma===p.wma&&s.id===p.id);
+  const key   = `${p.wma}_${p.id}`;
+  const counts = sampleCountsCache[key];
   return `<div style="font-family:monospace;font-size:11px;min-width:165px">
     <b style="color:#00d4aa">${p.name}</b><br/>
     ${p.rivName?`<span style="color:#7bafd4">${p.rivName.slice(0,55)}</span><br/>`:""}
     <span style="color:#7bafd4">WMA:</span> ${p.wma} &nbsp;
     <span style="color:#7bafd4">ID:</span> ${p.id}<br/>
-    <span style="color:#7bafd4">Coords:</span> ${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}<br/><br/>
+    <span style="color:#7bafd4">Coords:</span> ${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}<br/>
+    ${counts ? `
+    <div style="margin:5px 0 4px;padding:5px;background:#12244888;border-radius:4px;border:1px solid #1e3a6e">
+      <span style="color:#4ade80;font-weight:700">${counts.n.toLocaleString()} samples</span><br/>
+      <span style="color:#7bafd4;font-size:10px">${counts.first} → ${counts.last}</span><br/>
+      ${counts.medEC&&counts.medEC!=="n/a"?`<span style="color:#7bafd4;font-size:10px">Median EC: ${counts.medEC} mS/m</span>`:""}
+    </div>` : `<span style="color:#7bafd4;font-size:10px">📊 Click "Load Sample Counts" for stats</span><br/>`}
+    <br/>
     ${alreadyAdded
       ? `<span style="color:#4ade80">✓ Already in dashboard</span>`
       : `<button onclick="addFromMap('${p.wma}','${p.id}','${p.name.replace(/'/g,"\\'")}',${p.lat},${p.lon})"
