@@ -233,7 +233,7 @@
               style="font-size:10px;padding:3px 8px;white-space:nowrap;display:none"
               title="Load sample counts and date ranges for all stations">📊 Load Sample Counts</button>
             <button class="btn" onclick="openFullscreen()"
-              style="font-size:10px;padding:3px 8px" title="Fullscreen map">⛶</button>
+              style="font-size:10px;padding:3px 8px;white-space:nowrap" title="Enlarge map to fullscreen">⛶ Enlarge Map</button>
           </div>
           <div id="mapel"></div>
         </div>
@@ -328,6 +328,21 @@ function exc(data,twqr){
 // ── App state ─────────────────────────────────────────────────────────────────
 let stations=[{id:"90585",wma:"C13",name:"C13_90585",lat:null,lon:null,loaded:false,error:null,data:null}];
 let ai=0, ap=null, proxyUrl="https://dark-wave-214d.mvandl.workers.dev", chart=null, lmap=null, lmarkers=[];
+// True first/last sample dates derived from actually-loaded CSVs, keyed "WMA_ID".
+// Used to override the stale DWS 2018 summary dates in map popups.
+let actualDates = {};
+function recordActualDates(wma,id,data){
+  if(!data||!data.series)return;
+  let min=null,max=null;
+  for(const k of data.matched||[]){
+    for(const pt of data.series[k]||[]){
+      if(!pt.d)continue;
+      if(min===null||pt.d<min)min=pt.d;
+      if(max===null||pt.d>max)max=pt.d;
+    }
+  }
+  if(max) actualDates[`${wma}_${id}`]={first:min,last:max};
+}
 
 // ── Map init ──────────────────────────────────────────────────────────────────
 function initMap(){
@@ -813,12 +828,20 @@ function pinPopupHtml(p){
     <span style="color:#7bafd4">WMA:</span> ${p.wma} &nbsp;
     <span style="color:#7bafd4">ID:</span> ${p.id}<br/>
     <span style="color:#7bafd4">Coords:</span> ${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}<br/>
-    ${counts ? `
+    ${counts ? (()=>{
+      const real = actualDates[key];
+      const first = real ? real.first : counts.first;
+      const last  = real ? real.last  : counts.last;
+      const note  = real
+        ? `<span style="color:#4ade80;font-size:9px">✓ from loaded data</span>`
+        : `<span style="color:#f5a623;font-size:9px">DWS summary (~2018); plotted data may be newer</span>`;
+      return `
     <div style="margin:5px 0 4px;padding:5px;background:#12244888;border-radius:4px;border:1px solid #1e3a6e">
       <span style="color:#4ade80;font-weight:700">${counts.n.toLocaleString()} samples</span><br/>
-      <span style="color:#7bafd4;font-size:10px">${counts.first} → ${counts.last}</span><br/>
-      ${counts.medEC&&counts.medEC!=="n/a"?`<span style="color:#7bafd4;font-size:10px">Median EC: ${counts.medEC} mS/m</span>`:""}
-    </div>` : ""}
+      <span style="color:#7bafd4;font-size:10px">${first} → ${last}</span><br/>
+      ${counts.medEC&&counts.medEC!=="n/a"?`<span style="color:#7bafd4;font-size:10px">Median EC: ${counts.medEC} mS/m</span><br/>`:""}
+      ${note}
+    </div>`;})() : ""}
     <br/>
     ${alreadyAdded
       ? `<span style="color:#4ade80">✓ Already in dashboard</span>`
@@ -1202,6 +1225,7 @@ async function loadStn(i){
     if(nc&&rows[0])lon=parseFloat(rows[0][nc])||lon;
     stations[i]={...s,loaded:true,error:null,lat,lon,
       data:{headers,rows,series,matched,rowCount:rows.length}};
+    recordActualDates(s.wma,s.id,stations[i].data);
     if(!ap&&matched.length)ap=matched[0];
   }catch(e){stations[i]={...s,error:e.message};}
   refresh();
@@ -1414,6 +1438,7 @@ async function loadStnFromFile(i, file){
     if(nc&&rows[0])lon=parseFloat(rows[0][nc])||lon;
     stations[i]={...s,loaded:true,error:null,lat,lon,
       data:{headers,rows,series,matched,rowCount:rows.length}};
+    recordActualDates(s.wma,s.id,stations[i].data);
     if(!ap&&matched.length)ap=matched[0];
   }catch(e){stations[i]={...s,error:e.message};}
   refresh();
