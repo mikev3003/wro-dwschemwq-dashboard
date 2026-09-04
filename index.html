@@ -24,10 +24,10 @@
     #side   { width: 255px; border-right: 1px solid #1e3a6e; background: #0f2040;
               display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0; }
     #main   { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
-    #toprow { display: flex; height: 255px; border-bottom: 1px solid #1e3a6e; flex-shrink: 0; }
-    #mapbox { flex: 1; padding: 9px; }
-    #mapel  { width: 100%; height: 205px; border: 1px solid #1e3a6e; border-radius: 6px;
-              background: #122448; }
+    #toprow { display: flex; height: 380px; border-bottom: 1px solid #1e3a6e; flex-shrink: 0; }
+    #mapbox { flex: 1; padding: 9px; display: flex; flex-direction: column; min-height: 0; }
+    #mapel  { width: 100%; flex: 1; min-height: 0; border: 1px solid #1e3a6e; border-radius: 6px;
+              background: #e8eef2; }
     #statsbox { width: 225px; padding: 9px; border-left: 1px solid #1e3a6e; overflow-y: auto; flex-shrink: 0; }
 
     /* Fullscreen map overlay */
@@ -80,9 +80,14 @@
     .row    { display: flex; gap: 4px; margin-bottom: 4px; }
 
     /* ── Station card ── */
-    .sc     { padding: 8px 10px; cursor: pointer; border-left: 3px solid transparent; }
+    .sc     { padding: 8px 10px 8px 8px; cursor: pointer; border-left: 4px solid transparent;
+              transition: background .12s, border-color .12s; }
     .sc:hover { background: #0f204055; }
-    .sc.on  { border-left-color: #00d4aa; background: #122448aa; }
+    .sc.on  { border-left: 4px solid #00d4aa; background: #123a4d;
+              box-shadow: inset 0 0 0 1px #00d4aa55, 0 0 10px #00d4aa22; }
+    .sc-badge { display: inline-block; font-size: 8px; font-weight: 700; letter-spacing: .5px;
+              color: #0a1628; background: #00d4aa; border-radius: 3px;
+              padding: 1px 5px; margin-left: 6px; vertical-align: middle; }
 
     /* ── Stat card ── */
     .stc    { background: #122448; border: 1px solid #1e3a6e; border-radius: 5px;
@@ -328,8 +333,8 @@ let ai=0, ap=null, proxyUrl="https://dark-wave-214d.mvandl.workers.dev", chart=n
 function initMap(){
   try{
     lmap=L.map("mapel",{zoomControl:true}).setView([-29,25],5);
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-      {attribution:"© CartoDB",maxZoom:19}).addTo(lmap);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      {attribution:"© OpenStreetMap contributors",maxZoom:19}).addTo(lmap);
   }catch(e){
     document.getElementById("mapel").innerHTML=
       '<div style="color:#7bafd4;font-size:10px;padding:12px;text-align:center">Map loading…</div>';
@@ -338,15 +343,23 @@ function initMap(){
 
 function refreshMap(){
   if(!lmap)return;
+  lmap.invalidateSize();
   lmarkers.forEach(m=>m.remove()); lmarkers=[];
   const pts=[];
   stations.forEach((s,i)=>{
     if(!s.lat||!s.lon)return;
+    const active=(i===ai);
     const col=s.loaded?"#00d4aa":"#4fc3f7";
-    const icon=L.divIcon({html:`<div style="width:13px;height:13px;border-radius:50%;
-      background:${col};border:2px solid #fff;box-shadow:0 0 8px ${col};z-index:1000"></div>`,
-      className:"",iconAnchor:[7,7]});
-    const marker=L.marker([s.lat,s.lon],{icon,zIndexOffset:1000})
+    const sz=active?19:13, br=active?3:2, anc=sz/2+br;
+    const ring=active?`<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+        width:${sz+14}px;height:${sz+14}px;border-radius:50%;border:2px solid #ffd24a;
+        box-shadow:0 0 12px #ffd24a99;"></div>`:"";
+    const icon=L.divIcon({html:`<div style="position:relative;width:${sz+16}px;height:${sz+16}px;
+      display:flex;align-items:center;justify-content:center">${ring}
+      <div style="width:${sz}px;height:${sz}px;border-radius:50%;
+      background:${col};border:${br}px solid #fff;box-shadow:0 0 8px ${col}"></div></div>`,
+      className:"",iconAnchor:[(sz+16)/2,(sz+16)/2]});
+    const marker=L.marker([s.lat,s.lon],{icon,zIndexOffset:active?2000:1000})
       .bindPopup(`<div style="font-family:monospace;font-size:11px">
         <b style="color:#00d4aa">${s.name}</b><br/>
         ${s.wma}_${s.id}<br/>
@@ -895,7 +908,7 @@ function addFromMap(wma, id, name, lat, lon){
     alert("Station already in dashboard"); return;
   }
   stations.push({id,wma,name,lat,lon,loaded:false,error:null,data:null});
-  if(ai<0) ai=0;
+  ai=stations.length-1;
   if(lmap) lmap.closePopup();
   if(fsMap) fsMap.closePopup();
   refresh();
@@ -1130,7 +1143,7 @@ function renderList(){
     d.innerHTML=`
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
         <div style="flex:1;min-width:0">
-          <div style="font-weight:700;color:${i===ai?C.accent:C.text};margin-bottom:1px">${s.name}</div>
+          <div style="font-weight:700;color:${i===ai?C.accent:C.text};margin-bottom:1px">${s.name}${i===ai?`<span class="sc-badge">ACTIVE</span>`:""}</div>
           <div style="font-size:10px;color:${C.muted}">${s.wma}_${s.id}</div>
           ${s.data?`<div style="font-size:10px;color:${C.good};margin-top:1px">✓ ${s.data.rowCount} samples · ${s.data.matched.length} params</div>`:""}
           ${s.error?`<div style="font-size:10px;color:${C.danger};margin-top:1px;word-break:break-word">✗ ${isCors?"CORS blocked — use proxy or upload ZIP below":s.error}</div>`:""}
@@ -1205,7 +1218,7 @@ function addStation(){
   const lat=parseFloat(document.getElementById("flat").value)||null;
   const lon=parseFloat(document.getElementById("flon").value)||null;
   stations.push({id:stn,wma,name,lat,lon,loaded:false,error:null,data:null});
-  if(ai<0)ai=0;
+  ai=stations.length-1;
   ["fs","fn","flat","flon"].forEach(id=>document.getElementById(id).value="");
   refresh();
 }
@@ -1241,8 +1254,8 @@ function openFullscreen(){
 
   if(!fsMap){
     fsMap = L.map("map-fullscreen", {zoomControl:true}).setView([-29,25],5);
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-      {attribution:"© CartoDB", maxZoom:19}).addTo(fsMap);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      {attribution:"© OpenStreetMap contributors", maxZoom:19}).addTo(fsMap);
   }
   setTimeout(()=>fsMap.invalidateSize(), 150);
 
