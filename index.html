@@ -105,7 +105,6 @@
     #ftr    { border-top: 1px solid var(--line); padding: 6px 16px; font-size: 10px;
               color: var(--muted); display: flex; justify-content: space-between;
               flex-shrink: 0; background: var(--panel); gap: 1rem; }
-    #addform { padding: 11px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
     #stnlist { flex: 1; overflow-y: auto; }
     #ppick  { padding: 8px 11px; border-top: 1px solid var(--line); flex-shrink: 0; display: none; }
 
@@ -200,22 +199,6 @@
   <div id="body">
     <!-- Sidebar -->
     <div id="side">
-      <div id="addform">
-        <div class="lbl">+ ADD STATION</div>
-        <div class="row">
-          <input id="fw" value="A21" style="width:70px" placeholder="WMA"/>
-          <input id="fs" style="flex:1" placeholder="Station no."/>
-        </div>
-        <div class="row">
-          <input id="fn" style="flex:1" placeholder="Label (optional)"/>
-        </div>
-        <div class="row">
-          <input id="flat" type="number" style="flex:1" placeholder="Lat"/>
-          <input id="flon" type="number" style="flex:1" placeholder="Lon"/>
-        </div>
-        <button class="btn abtn" style="width:100%" onclick="addStation()">Add Station</button>
-      </div>
-
       <div id="stnlist">
         <div class="lbl" style="padding:6px 10px 3px">MONITORING STATIONS</div>
       </div>
@@ -231,7 +214,7 @@
         <div id="map-overlay-hdr">
           <div style="font-family:'Playfair Display',serif;font-size:15px;font-weight:700;color:#fff;letter-spacing:.3px">🗺 Station Browser</div>
           <div id="search-wrap" style="margin-left:10px">
-            <input id="stn-search-fs" type="text" placeholder="Search station, river or WMA…"
+            <input id="stn-search-fs" type="text" placeholder="Search station, code, river or WMA…"
               style="width:100%;padding:5px 28px 5px 8px;background:#f4f9fd;border:1px solid #d5dfeb;
               border-radius:4px;color:#1c2b3a;font-family:inherit;font-size:11px;outline:none"
               oninput="searchStations(this.value,'fs')" onfocus="this.style.borderColor='#1a5276'"
@@ -271,7 +254,7 @@
             <!-- Search box -->
             <div style="position:relative;flex:1;min-width:120px;max-width:260px">
               <input id="stn-search-main" type="text"
-                placeholder="Search station or river…"
+                placeholder="Search station, code or river…"
                 style="width:100%;padding:3px 22px 3px 7px;background:#f4f9fd;
                 border:1px solid #d5dfeb;border-radius:3px;color:#1c2b3a;
                 font-family:inherit;font-size:10px;outline:none"
@@ -315,7 +298,7 @@
             <div style="font-size:30px">📡</div>
             <div>No data loaded yet</div>
             <div style="font-size:10px;text-align:center;max-width:260px">
-              Add a DWS station (WMA + station number) and click ↓ Fetch Data</div>
+              Find a station on the map (Browse All Stations or search), add it to the dashboard, then click ↓ Fetch Data</div>
           </div>
           <canvas id="myChart"></canvas>
         </div>
@@ -388,6 +371,90 @@ function pm(col){
 function exc(data,twqr){
   if(!twqr||!data.length||twqr[1]===null)return null;
   return Math.round(data.filter(d=>d.v<twqr[0]||d.v>twqr[1]).length/data.length*100);
+}
+
+// ── Lightweight "intelligence" helpers ────────────────────────────────────────
+// All operate on the standard point array [{t:Date, d:'YYYY-MM-DD', v:Number}, …]
+// which is already time-sorted ascending.
+
+// 1. Trend: ordinary least-squares slope of value vs. time (years).
+//    Returns {slope, pctPerYear, dir, strong} or null if too few points.
+//    "dir" is +1 rising / -1 falling / 0 flat, judged relative to the data's spread.
+function trendOf(data){
+  const n=data.length;
+  if(n<6)return null;                                   // too few points to trust a trend
+  const t0=data[0].t.getTime();
+  const yr=d=>(d.t.getTime()-t0)/(365.25*24*3600*1000); // x in years from first sample
+  let sx=0,sy=0,sxx=0,sxy=0;
+  data.forEach(d=>{const x=yr(d),y=d.v;sx+=x;sy+=y;sxx+=x*x;sxy+=x*y;});
+  const denom=n*sxx-sx*sx;
+  if(denom===0)return null;
+  const slope=(n*sxy-sx*sy)/denom;                      // units per year
+  const mean=sy/n;
+  const years=yr(data[n-1]);
+  if(years<=0)return null;
+  const sd=Math.sqrt(data.reduce((a,d)=>a+(d.v-mean)**2,0)/n);
+  // "meaningful" = total change over the record is at least ~half a std-dev
+  const totalChange=Math.abs(slope*years);
+  const dir = totalChange < 0.5*sd ? 0 : (slope>0?1:-1);
+  const pctPerYear = mean!==0 ? (slope/mean*100) : null;
+  const strong = sd>0 && totalChange > sd;              // change exceeds one std-dev
+  return {slope, pctPerYear, dir, strong, years};
+}
+
+// For most WQ parameters a rising concentration is "worse". pH is the exception
+// (both extremes bad), so we don't label pH direction as better/worse.
+function trendVerdict(meta, tr){
+  if(!tr || tr.dir===0) return {word:"stable", arrow:"→", cls:"stable"};
+  if(meta.key==="pH")  return {word: tr.dir>0?"rising":"falling", arrow: tr.dir>0?"↗":"↘", cls:"neutral"};
+  // higher = worse for the rest
+  return tr.dir>0
+    ? {word:"worsening", arrow:"↗", cls:"bad"}
+    : {word:"improving", arrow:"↘", cls:"good"};
+}
+
+// 2. Latest value + status vs TWQR. Returns {val, date, status} where status is
+//    'good' | 'warn' | 'alert' | null (no guideline).
+function latestStatus(data, twqr){
+  if(!data.length)return null;
+  const last=data[data.length-1];
+  let status=null;
+  if(twqr && twqr[1]!==null){
+    const [lo,hi]=twqr;
+    if(last.v<lo || last.v>hi){
+      // how far past the limit → warn vs alert (≥50% over the upper bound = alert)
+      const over = last.v>hi ? (last.v-hi)/(hi||1) : (lo-last.v)/(lo||1);
+      status = over>=0.5 ? "alert" : "warn";
+    } else status="good";
+  }
+  return {val:last.v, date:last.d, status};
+}
+
+// 4. Freshness: years since the most recent sample (relative to today).
+function freshnessOf(data){
+  if(!data.length)return null;
+  const last=data[data.length-1].t.getTime();
+  const years=(Date.now()-last)/(365.25*24*3600*1000);
+  return {years, date:data[data.length-1].d};
+}
+
+// 5. Seasonal hint: compare summer (Nov–Apr, SA wet season) vs winter (May–Oct)
+//    means. Returns {higher:'summer'|'winter', pctDiff} or null if not clear.
+function seasonalOf(data){
+  if(data.length<12)return null;                        // need a reasonable spread
+  const summer=[],winter=[];
+  data.forEach(d=>{
+    const m=d.t.getMonth();                             // 0=Jan … 11=Dec
+    (m>=10||m<=3 ? summer : winter).push(d.v);          // Nov–Apr = summer
+  });
+  if(summer.length<4||winter.length<4)return null;
+  const avg=a=>a.reduce((x,y)=>x+y,0)/a.length;
+  const sMean=avg(summer), wMean=avg(winter);
+  const base=(sMean+wMean)/2;
+  if(base===0)return null;
+  const pctDiff=Math.abs(sMean-wMean)/base*100;
+  if(pctDiff<15)return null;                            // <15% difference = no clear pattern
+  return {higher: sMean>wMean?"summer":"winter", pctDiff:Math.round(pctDiff)};
 }
 
 // ── App state ─────────────────────────────────────────────────────────────────
@@ -1229,11 +1296,71 @@ function renderStats(){
   const mean=(vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(2);
   const mn=Math.min(...vals).toFixed(2),mx=Math.max(...vals).toFixed(2);
   const meta=pm(ap),ex=exc(data,meta.twqr),ec=ex>20?C.danger:C.good;
-  el.innerHTML=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:4px">
+
+  // ── Intelligence layer ──
+  const tr   = trendOf(data);
+  const tv   = tr ? trendVerdict(meta, tr) : null;
+  const ls   = latestStatus(data, meta.twqr);
+  const fr    = freshnessOf(data);
+  const se   = seasonalOf(data);
+  const statusCol = {good:C.good, warn:"#e67e22", alert:C.danger, null:C.muted};
+  const trendCol  = {good:C.good, bad:C.danger, neutral:C.accent2, stable:C.muted};
+
+  // Latest value + status dot
+  const latestCard = ls ? (()=>{
+    const col = statusCol[ls.status] || C.muted;
+    const lbl = ls.status==="good"?"within guideline"
+              : ls.status==="warn"?"above guideline"
+              : ls.status==="alert"?"well above guideline":"";
+    return `<div class="stc" style="border-color:${col}55;background:${col}14;margin-bottom:4px">
+      <div class="stcl">LATEST VALUE · ${ls.date}</div>
+      <div style="display:flex;align-items:center;gap:7px">
+        <span style="width:11px;height:11px;border-radius:50%;background:${col};flex-shrink:0;
+          box-shadow:0 0 0 2px ${col}33"></span>
+        <span style="font-size:17px;font-weight:700;color:${C.text};font-family:'Playfair Display',serif">
+          ${ls.val.toFixed(2)} ${meta.unit||""}</span>
+      </div>
+      ${lbl?`<div style="font-size:9px;color:${col};margin-top:2px;font-weight:600">${lbl}</div>`:""}
+    </div>`;
+  })() : "";
+
+  // Trend arrow line
+  const trendCard = tv ? `<div class="stc" style="margin-bottom:4px">
+      <div class="stcl">TREND ${tr.years>=1?`(${tr.years.toFixed(0)}-yr record)`:""}</div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="font-size:18px;font-weight:700;color:${trendCol[tv.cls]}">${tv.arrow}</span>
+        <span style="font-size:13px;font-weight:700;color:${trendCol[tv.cls]};text-transform:capitalize">${tv.word}</span>
+      </div>
+      ${tr.dir!==0&&tr.pctPerYear!==null?`<div style="font-size:9px;color:${C.muted};margin-top:1px">
+        ${tr.pctPerYear>0?"+":""}${tr.pctPerYear.toFixed(1)}% per year${tr.strong?" · marked":""}</div>`:""}
+    </div>` : "";
+
+  // Freshness flag — only surface when data is getting old (≥2 yr)
+  const freshCard = (fr && fr.years>=2) ? (()=>{
+    const col = fr.years>=5 ? C.danger : "#e67e22";
+    const yrs = fr.years>=1 ? `${fr.years.toFixed(0)} year${fr.years>=2?"s":""}` : "under a year";
+    return `<div class="stc" style="border-color:${col}55;background:${col}14;margin-bottom:4px">
+      <div class="stcl" style="color:${col}">⚠ DATA FRESHNESS</div>
+      <div style="font-size:11px;color:${C.text}">Last sample ${fr.date}</div>
+      <div style="font-size:9px;color:${col};margin-top:1px">~${yrs} ago — may not reflect current conditions</div>
+    </div>`;
+  })() : "";
+
+  // Seasonal hint
+  const seasonCard = se ? `<div class="stc" style="margin-bottom:4px">
+      <div class="stcl">SEASONAL PATTERN</div>
+      <div style="font-size:11px;color:${C.text}">
+        Typically <b style="color:${C.accent}">higher in ${se.higher}</b></div>
+      <div style="font-size:9px;color:${C.muted};margin-top:1px">
+        ~${se.pctDiff}% difference between wet (Nov–Apr) &amp; dry seasons</div>
+    </div>` : "";
+
+  el.innerHTML=`${latestCard}${trendCard}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:4px">
     ${[["SAMPLES",data.length],["MEAN",`${mean} ${meta.unit||""}`],
        ["MIN",`${mn} ${meta.unit||""}`],["MAX",`${mx} ${meta.unit||""}`]]
       .map(([l,v])=>`<div class="stc"><div class="stcl">${l}</div><div class="stcv">${v}</div></div>`).join("")}
-    </div>${ex!==null?`<div class="stc" style="border-color:${ec};background:${ec}22">
+    </div>${freshCard}${seasonCard}${ex!==null?`<div class="stc" style="border-color:${ec};background:${ec}22">
       <div class="stcl">TWQR EXCEEDANCE</div>
       <div style="font-size:20px;font-weight:700;color:${ec}">${ex}%</div>
       <div style="font-size:9px;color:${C.muted}">Target: ${meta.twqr[0]}–${meta.twqr[1]} ${meta.unit||""}</div>
@@ -1282,6 +1409,12 @@ function renderList(){
   const totSamples=stations.reduce((a,s)=>a+(s.data?.rowCount||0),0);
   const hsS=document.getElementById("hs-stations"); if(hsS)hsS.textContent=stations.length;
   const hsM=document.getElementById("hs-samples"); if(hsM)hsM.textContent=totSamples?totSamples.toLocaleString():"--";
+  if(stations.length===0){
+    el.innerHTML+=`<div style="padding:16px 12px;color:#5b6b7c;font-size:11px;line-height:1.6;text-align:center">
+      No stations selected yet.<br/>
+      Use <b style="color:#1a5276">🗺 Browse All Stations</b> or the search box on the map,
+      then click a station and <b style="color:#17a589">+ Add to Dashboard</b>.</div>`;
+  }
   stations.forEach((s,i)=>{
     const d=document.createElement("div");
     d.className="sc"+(i===ai?" on":"");
@@ -1357,19 +1490,6 @@ function rmStn(i){stations.splice(i,1);if(ai>=i)ai=Math.max(0,ai-1);if(!stations
 function rlStn(i){stations[i]={...stations[i],loaded:false,error:null,data:null};refresh();loadStn(i);}
 
 // ── Form handlers ─────────────────────────────────────────────────────────────
-function addStation(){
-  const wma=document.getElementById("fw").value.trim().toUpperCase();
-  const stn=document.getElementById("fs").value.trim();
-  if(!wma||!stn)return;
-  const name=document.getElementById("fn").value.trim()||`${wma}_${stn}`;
-  const lat=parseFloat(document.getElementById("flat").value)||null;
-  const lon=parseFloat(document.getElementById("flon").value)||null;
-  stations.push({id:stn,wma,name,lat,lon,loaded:false,error:null,data:null});
-  ai=stations.length-1;
-  ["fs","fn","flat","flon"].forEach(id=>document.getElementById(id).value="");
-  refresh();
-}
-
 function toggleSettings(){document.getElementById("setpan").classList.toggle("open");}
 
 async function testProxy(){
