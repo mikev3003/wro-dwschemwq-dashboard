@@ -912,6 +912,14 @@ function makeClusterIcon(count){
   });
 }
 
+// Escape a value for safe inclusion in an HTML attribute (prevents station
+// names with quotes/&/<> from breaking the popup markup or its button).
+function escAttr(s){
+  return String(s==null?"":s)
+    .replace(/&/g,"&amp;").replace(/"/g,"&quot;")
+    .replace(/'/g,"&#39;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
 function pinPopupHtml(p){
   const alreadyAdded = stations.some(s=>s.wma===p.wma&&s.id===p.id);
   const key   = `${p.wma}_${p.id}`;
@@ -941,10 +949,11 @@ function pinPopupHtml(p){
     </div>`;})() : ""}
     <br/>
     ${alreadyAdded
-      ? `<span style="color:#4ade80">✓ Already in dashboard</span>`
-      : `<button onclick="addFromMap('${p.wma}','${p.id}','${p.name.replace(/'/g,"\\'")}',${p.lat},${p.lon})"
-           style="background:#1a527622;border:1px solid #1a5276;color:#1a5276;
-           border-radius:3px;padding:3px 8px;cursor:pointer;font-family:'DM Sans',sans-serif;
+      ? `<span style="color:#5ee6a8;font-weight:600">✓ Already in dashboard</span>`
+      : `<button class="add-stn-btn" data-wma="${escAttr(p.wma)}" data-id="${escAttr(p.id)}"
+           data-name="${escAttr(p.name)}" data-lat="${p.lat}" data-lon="${p.lon}"
+           style="background:#17a589;border:1px solid #17a589;color:#fff;font-weight:600;
+           border-radius:5px;padding:5px 8px;cursor:pointer;font-family:'DM Sans',sans-serif;
            font-size:11px;width:100%">+ Add to Dashboard</button>`
     }
   </div>`;
@@ -1515,6 +1524,18 @@ document.addEventListener("click", e=>{
       const el=document.getElementById(id);
       if(el) el.style.display="none";
     });
+  }
+  // "+ Add to Dashboard" buttons inside map popups (robust against any
+  // characters in the station name — data comes from data-* attributes)
+  const addBtn = e.target.closest(".add-stn-btn");
+  if(addBtn){
+    addFromMap(
+      addBtn.dataset.wma,
+      addBtn.dataset.id,
+      addBtn.dataset.name,
+      parseFloat(addBtn.dataset.lat),
+      parseFloat(addBtn.dataset.lon)
+    );
   }
 });
 function dzOver(e,i){
