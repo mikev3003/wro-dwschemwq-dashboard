@@ -156,6 +156,74 @@
     .leaflet-popup-tip { background: var(--blue-deep) !important; }
     .leaflet-popup-close-button { color: var(--blue-pale) !important; }
     .leaflet-container { font-family: "DM Sans", sans-serif; }
+
+    /* ════════════════════════════════════════════════════════════════════
+       MOBILE / NARROW SCREENS — stack the three columns vertically.
+       Desktop layout above is untouched; this only applies ≤768px wide.
+       ════════════════════════════════════════════════════════════════════ */
+    @media (max-width: 768px) {
+      html, body { font-size: 14px; }           /* a touch larger for readability */
+      #wrap { height: auto; min-height: 100vh; overflow: visible; }
+
+      /* Header: let it wrap, shrink logos a little */
+      #hdr { gap: 10px; padding: 0.6rem 0.9rem; }
+      .brand-wro { height: 34px; }
+      .brand-kh  { height: 38px; }
+      .hdr-title h1 { font-size: 1rem; }
+      .hdr-title .sub { font-size: 0.58rem; }
+      .hdr-stats { width: 100%; margin-left: 0; justify-content: flex-start; }
+
+      /* Body: single column, page scrolls naturally */
+      #body { flex-direction: column; min-height: 0; }
+
+      /* Sidebar (station list) — full width, auto height, sits on top */
+      #side { width: 100%; border-right: none; border-bottom: 1px solid var(--line);
+              max-height: none; }
+      #stnlist { max-height: 40vh; }            /* cap the list so it doesn't push the map away */
+
+      /* Main column */
+      #main { min-width: 0; }
+
+      /* Map + stats were side-by-side; stack them */
+      #toprow { flex-direction: column; height: auto; }
+      #mapbox { padding: 8px; }
+      #mapel  { height: 300px; flex: none; }     /* give the map a real, tappable height */
+      #statsbox { width: 100%; border-left: none; border-top: 1px solid var(--line); }
+
+      /* Chart: give it a usable height */
+      #chartbox { padding: 8px; }
+      #canvaswrap { height: 300px; flex: none; }
+
+      /* Parameter chips scroll sideways instead of wrapping into a tall block */
+      #pbar { white-space: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      #ppick #pbtns { display: flex; flex-wrap: wrap; }
+
+      /* Bigger tap targets */
+      .btn { padding: 8px 14px; font-size: 13px; }
+      input { padding: 8px 9px; font-size: 14px; }
+      .pb { padding: 5px 11px; font-size: 12px; margin: 3px; }
+      .sc { padding: 11px 12px; }
+      #stn-search { font-size: 14px; padding: 8px 30px 8px 10px; }
+
+      /* Map header controls wrap neatly */
+      #mapbox > div:first-child { gap: 6px; }
+
+      /* Fullscreen overlay already covers the screen — just enlarge its controls */
+      #map-overlay-hdr { flex-wrap: wrap; padding: 0.5rem 0.7rem; }
+      #map-overlay-hdr .btn { padding: 6px 10px; }
+
+      /* Footer: let the two notes stack */
+      #ftr { flex-direction: column; gap: 4px; font-size: 9px; }
+    }
+
+    /* Very narrow phones */
+    @media (max-width: 420px) {
+      .hdr-title .sub { display: none; }         /* drop the long subtitle line */
+      .brand-wro { height: 30px; }
+      .brand-kh  { height: 34px; }
+      #mapel { height: 260px; }
+      #canvaswrap { height: 260px; }
+    }
   </style>
 </head>
 <body>
@@ -482,6 +550,13 @@ function initMap(){
     lmap=L.map("mapel",{zoomControl:true}).setView([-29,25],5);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
       {attribution:"© OpenStreetMap contributors",maxZoom:19}).addTo(lmap);
+    // After layout settles (esp. on mobile stacked layout) redraw tiles.
+    setTimeout(()=>{ try{lmap.invalidateSize();}catch(e){} }, 300);
+    // Keep the map correct through orientation changes / resizes.
+    let rz; window.addEventListener("resize", ()=>{
+      clearTimeout(rz);
+      rz=setTimeout(()=>{ try{lmap&&lmap.invalidateSize();}catch(e){} }, 200);
+    });
   }catch(e){
     document.getElementById("mapel").innerHTML=
       '<div style="color:#5b6b7c;font-size:10px;padding:12px;text-align:center">Map loading…</div>';
