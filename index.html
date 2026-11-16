@@ -652,7 +652,7 @@ let indexLoaded = false;   // true once station_index.json has populated allPins
 // counts and date ranges. The live KMZ path (loadKmz) remains as a fallback.
 async function loadStationIndex(){
   try{
-    const r = await fetch("station_index.json", {cache:"force-cache"});
+    const r = await fetch("station_index.json");
     if(!r.ok) throw new Error("HTTP "+r.status);
     const payload = await r.json();
     const rows = payload.stations || [];
@@ -665,10 +665,12 @@ async function loadStationIndex(){
     }));
     allPinsCache = pins;
     // Pre-fill the sample-counts cache so popups show counts + CURRENT dates
-    // immediately, with no separate "Load Sample Counts" step.
+    // immediately, and the type lookup so the type filter works even on pins
+    // that later come from the live KMZ path.
     pins.forEach((p,i)=>{
       const a = rows[i];
       sampleCountsCache[`${p.wma}_${p.id}`] = { n:a[6], first:a[7], last:a[8], medEC:"" };
+      typeByKey[`${p.wma}_${p.id}`] = a[3];
     });
     countsLoaded = true;
     indexLoaded  = true;
@@ -682,7 +684,11 @@ async function loadStationIndex(){
     ["counts-btn","counts-btn-fs"].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display="none";});
     return true;
   }catch(e){
-    console.warn("Station index not available, will fall back to live KMZ:", e.message);
+    console.warn("Station index (station_index.json) not loaded — falling back to live KMZ. Reason:", e.message);
+    // Make the failure visible so it's clear the built-in index isn't active
+    // (e.g. station_index.json not uploaded beside index.html, or still deploying).
+    ["kmz-status","kmz-status-fs"].forEach(id=>{const el=document.getElementById(id);
+      if(el){el.textContent="built-in index not found — using live DWS";el.style.color="#e67e22";}});
     return false;
   }
 }
@@ -786,18 +792,30 @@ const SURFACE_TYPES = new Set([
 const BOREHOLE_TYPES = new Set([
   "Borehole","Other Ground Fractures","Mine Shaft","Well Point","Dug Well","Sinkhole"
 ]);
+// Type lookup keyed "WMA_id", populated from the station index. Lets us type
+// even pins that came from the live KMZ path (which carries no type field).
+const typeByKey = {};
+function typeOf(p){
+  if(p.type && p.type.trim()) return p.type.trim();
+  const t = typeByKey[`${p.wma}_${p.id}`];
+  return t || "";
+}
 function typeGroup(p){
-  const t = (p.type||"").trim();
+  const t = typeOf(p);
+  if(!t) return "unknown";                 // genuinely unknown — never hidden by a type filter
   if(SURFACE_TYPES.has(t))  return "surface";
   if(BOREHOLE_TYPES.has(t)) return "borehole";
   return "other";
 }
 // Colour pins by group so surface vs groundwater reads at a glance.
-const GROUP_COLOR = { surface:"#2e86c1", borehole:"#b07d2b", other:"#7f8c8d" };
+const GROUP_COLOR = { surface:"#2e86c1", borehole:"#b07d2b", other:"#7f8c8d", unknown:"#5b6b7c" };
 
 let typeFilter = "all";   // "all" | "surface" | "borehole" | "other"
 function passesTypeFilter(p){
-  return typeFilter==="all" || typeGroup(p)===typeFilter;
+  if(typeFilter==="all") return true;
+  const g = typeGroup(p);
+  if(g==="unknown") return true;           // don't hide a pin whose type we can't determine
+  return g===typeFilter;
 }
 function setTypeFilter(val){
   typeFilter = val;
